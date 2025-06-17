@@ -1,0 +1,265 @@
+feature,importance
+x2_S2 radii ionic (Yagoda) (A),0.23833246678262535
+x_d_A1 atomic number,0.11981615135070603
+x_d_C13 poissons ratio,0.09040300966220606
+x_d_E5 energy ionization first (kJ mol-1),0.08769960254725909
+x1_S2 radii ionic (Yagoda) (A),0.08043666454677559
+x_d_A2 atomic weight (10-3 kg),0.04758204273859
+x_d_C12 thermal conductivity(W/(m·K)),0.034047281578968074
+x_r_E5 energy ionization first (kJ mol-1),0.030010480865991153
+x_r_E12 charge nuclear effective (Clementi),0.022187717007139583
+x1_E5 energy ionization first (kJ mol-1),0.017111337970199692
+x_r_G1 group number ,0.01554725888529661
+x2_G4 valence electron of orbital d,0.013471556851282492
+x1_C17 coefficient of linear thermal expansion(10-6 k-1),0.012058448772012087
+x_d_E12 charge nuclear effective (Clementi),0.009856640550324116
+x2_C13 poissons ratio,0.00911197279462695
+x_d_S2 radii ionic (Yagoda) (A),0.006742019482410068
+x2_C15 diffusion coefficient D0,0.006558633034704507
+x_d_A3 mass attenuation coefficient for MoKalpha (cm2 g-1),0.006005668971075936
+x_d_S5 distance valence electron (Schubert) (A),0.005044984946131356
+x1_S11 lattice constant a (pm),0.004945321738205836
+x1_C16 specific heat capacity(J/(kg K)),0.0048870129590753
+x_r_S16 density(g/cm3),0.004886821708120966
+x_d_C16 specific heat capacity(J/(kg K)),0.004506502300161676
+x_r_E13 electrical resistivity(10-8ohmm),0.004258193987462204
+x1_C12 thermal conductivity(W/(m·K)),0.004172402546454566
+x1_C3 enthalpy vaporization (kJ mol-1),0.0041679160292589406
+x_d_E1 electronegativity (Martynov&Batsanov) ,0.0038186315891296342
+x2_E5 energy ionization first (kJ mol-1),0.003775873951948179
+x1_S12 lattice constant b (pm),0.003394846115727422
+x_r_A2 atomic weight (10-3 kg),0.0033450333979800307
+x2_E4 electronegativity absolute  ,0.0033175997722928703
+x_d_E15 Corrosion potential in seawater(V),0.003253843854772104
+x1_A7 atomic electron scattering factor at 0.5,0.003080676427155479
+x_r_S2 radii ionic (Yagoda) (A),0.003021014830371922
+x_r_C6 enthalpy surface Miedema (kJ mol-1),0.002898320989302399
+x2_S12 lattice constant b (pm),0.002854281858190918
+x_r_S11 lattice constant a (pm),0.002803521790785302
+x1_E13 electrical resistivity(10-8ohmm),0.0025960748940598373
+x2_C12 thermal conductivity(W/(m·K)),0.0024677619903374294
+x2_E14 Standard electrode potential(ev),0.0023929754142252226
+x2_A1 atomic number,0.0021745059761688512
+x1_A2 atomic weight (10-3 kg),0.002034016964016424
+x2_E13 electrical resistivity(10-8ohmm),0.001975625797313395
+x_d_G1 group number ,0.0019685453391211994
+x_r_S13 lattice constant c (pm),0.0019316943118733974
+x_r_C7 enthalpy vacancies Miedema (kJ mol-1),0.0018943802693948055
+x_d_S6 distance core electron (Schubert) (A),0.001884965025623667
+x1_C10 modulus bulk (GPa),0.001648307446934378
+x2_C18 weighted surface energy(J/m2),0.001640387228275433
+x2_S11 lattice constant a (pm),0.0016307699465247596
+x2_E6 energy ionization second (kJ mol-1),0.0016247384156839952
+x_d_A6 mass attenuation coefficient FeKalpha (cm2 g-1),0.0016227711907592587
+x_d_E14 Standard electrode potential(ev),0.0016170820243305742
+x2_A2 atomic weight (10-3 kg),0.0014969238150165341
+x_r_S12 lattice constant b (pm),0.0014636416632775185
+x_d_S14 velocity of sound(m/s),0.0013949900165155596
+x_r_C16 specific heat capacity(J/(kg K)),0.001376543180265527
+x_d_A5 mass attenuation coefficient for CuKalpha (cm2 g-1),0.001335767269633833
+x_d_S18 Slip system,0.001287522523472494
+x_d_S13 lattice constant c (pm),0.001271331782227128
+x_d_S11 lattice constant a (pm),0.0012635126932267562
+x_d_S4 radii metal (Waber) (A),0.001254050476499464
+x_r_C18 weighted surface energy(J/m2),0.0012461528042683053
+x2_C16 specific heat capacity(J/(kg K)),0.0012435468538369548
+x2_S13 lattice constant c (pm),0.001207195354538287
+x1_E6 energy ionization second (kJ mol-1),0.0011965797180195851
+x2_C17 coefficient of linear thermal expansion(10-6 k-1),0.0010758864993913617
+x1_C18 weighted surface energy(J/m2),0.0010456665324832057
+x_d_E3 electronegativity (Alfred-Rochow)  ,0.0010261936138003826
+x2_E15 Corrosion potential in seawater(V),0.0009995666180333575
+x1_S4 radii metal (Waber) (A),0.0009169163975516546
+x1_S18 Slip system,0.0008823425159661853
+x_r_E11 nuclear charge effective (Slater),0.0008731358066289037
+x_r_S4 radii metal (Waber) (A),0.0008524258339638259
+x_d_C14 diffusion activation energy in Al(kJ mol-1),0.0008490359645900337
+x1_C4 enthalpy melting (kJ mol-1),0.0008441641899130955
+x1_C13 poissons ratio,0.0008232373455175611
+x1_C20 modulus Young (GPa),0.0008214442471585596
+x_r_C11 modulus rigidity (GPa),0.000765933853264379
+x2_S15 burger vector(pm),0.0006907940748558842
+x_r_A7 atomic electron scattering factor at 0.5,0.0006868896661790258
+x_d_C11 modulus rigidity (GPa),0.000677688698078492
+x_r_A6 mass attenuation coefficient FeKalpha (cm2 g-1),0.0006395271817157858
+x_r_C14 diffusion activation energy in Al(kJ mol-1),0.0006323219037134096
+x_d_S12 lattice constant b (pm),0.0006273170376327642
+x1_G3 valence electron of orbital p,0.000609985373760715
+x_d_E13 electrical resistivity(10-8ohmm),0.0005989916993732457
+x_r_C19 diffusion activation energy(kJ mol-1),0.0005510246416493897
+x1_E9 work function (eV),0.0005412142278899581
+x2_C20 modulus Young (GPa),0.0005323170293680664
+x_d_C6 enthalpy surface Miedema (kJ mol-1),0.0005321049601376551
+x_d_C1 temperature melting (K),0.00046531612586527276
+x1_S8 V2/3 Miedema (cm2),0.0004467561859820877
+x1_S14 velocity of sound(m/s),0.00044392811313364585
+x2_S18 Slip system,0.00044287895683840415
+x1_C21 Interfacial energy(mJ/m2),0.0004372797803966102
+x1_A6 mass attenuation coefficient FeKalpha (cm2 g-1),0.00039899815144253767
+x_d_C18 weighted surface energy(J/m2),0.00038979899768460595
+x_r_S5 distance valence electron (Schubert) (A),0.00037240849555307407
+x_r_E1 electronegativity (Martynov&Batsanov) ,0.0003714968327969185
+x1_C1 temperature melting (K),0.00036314854876522563
+x_d_C10 modulus bulk (GPa),0.0003615726660977329
+x_r_S15 burger vector(pm),0.00035621921063853484
+x2_C8 energy cohesive Brewer (J mol-1),0.0003555085584327958
+x1_C9 modulus compression (GPa),0.00034562795299866836
+x1_C11 modulus rigidity (GPa),0.0003426066649517247
+"x_d_S9 atomic environment number (Villars, Daams)",0.000338890705470904
+x_r_E3 electronegativity (Alfred-Rochow)  ,0.0003372801137997283
+x2_S5 distance valence electron (Schubert) (A),0.00033651112083649517
+x1_S3 radii covalent (pm),0.0002941927308194768
+x_r_G4 valence electron of orbital d,0.00027890138663161774
+x2_C2 temperature boiling (K),0.00027719756790294626
+x2_S8 V2/3 Miedema (cm2),0.0002699805094025577
+x2_C21 Interfacial energy(mJ/m2),0.0002671226975355486
+x1_A4 mass attenuation coefficient CrKalpha (cm2 g-1),0.0002624626616352621
+x_r_E14 Standard electrode potential(ev),0.000258298209919287
+x2_S10 radii atomic (coordination number 12) (pm),0.00025656320715355366
+x_r_C10 modulus bulk (GPa),0.00025276784139238143
+x2_C11 modulus rigidity (GPa),0.0002527409399688895
+x2_E10 nWS1/3 Miedema (a.u.-1/3),0.00023936857701987955
+x2_E2 electronegativity (Pauling) ,0.00023438167089908935
+x_d_E6 energy ionization second (kJ mol-1),0.00022598302498371542
+"x_d_S7 volume atom (Villars, Daams) (10-2 nm3)",0.00022072723779293602
+x2_S16 density(g/cm3),0.00021977299972473114
+x2_E3 electronegativity (Alfred-Rochow)  ,0.00021876634361402383
+x1_G1 group number ,0.00019981980933571212
+x_r_S10 radii atomic (coordination number 12) (pm),0.0001986886740205699
+x_d_A4 mass attenuation coefficient CrKalpha (cm2 g-1),0.00019411491434200465
+x_r_E4 electronegativity absolute  ,0.00019002118466925947
+x_r_C3 enthalpy vaporization (kJ mol-1),0.000181654816585918
+x2_E1 electronegativity (Martynov&Batsanov) ,0.00017941819650702418
+x_d_S16 density(g/cm3),0.00015973301381738523
+x2_S4 radii metal (Waber) (A),0.00015902336306830857
+x_r_C17 coefficient of linear thermal expansion(10-6 k-1),0.00015417954066245884
+x_d_S8 V2/3 Miedema (cm2),0.00015305906430124156
+x_r_S14 velocity of sound(m/s),0.00014513419869503013
+x1_C15 diffusion coefficient D0,0.0001355353707782696
+x_r_C20 modulus Young (GPa),0.00012143274800958149
+x2_C14 diffusion activation energy in Al(kJ mol-1),0.00010258036273053605
+x_r_A4 mass attenuation coefficient CrKalpha (cm2 g-1),9.903598161521681e-05
+"x1_S7 volume atom (Villars, Daams) (10-2 nm3)",4.0872490002667366e-05
+x2_A6 mass attenuation coefficient FeKalpha (cm2 g-1),0.0
+x1_E2 electronegativity (Pauling) ,0.0
+x1_E1 electronegativity (Martynov&Batsanov) ,0.0
+x_r_E2 electronegativity (Pauling) ,0.0
+x_d_E2 electronegativity (Pauling) ,0.0
+x_d_C2 temperature boiling (K),0.0
+x2_A3 mass attenuation coefficient for MoKalpha (cm2 g-1),0.0
+x2_A4 mass attenuation coefficient CrKalpha (cm2 g-1),0.0
+x_r_A3 mass attenuation coefficient for MoKalpha (cm2 g-1),0.0
+x1_A5 mass attenuation coefficient for CuKalpha (cm2 g-1),0.0
+x2_A5 mass attenuation coefficient for CuKalpha (cm2 g-1),0.0
+x2_C1 temperature melting (K),0.0
+x_r_C1 temperature melting (K),0.0
+x1_C2 temperature boiling (K),0.0
+x_r_G5 valence electron of orbital f,0.0
+x2_G5 valence electron of orbital f,0.0
+x_r_A5 mass attenuation coefficient for CuKalpha (cm2 g-1),0.0
+x2_A7 atomic electron scattering factor at 0.5,0.0
+x_d_A7 atomic electron scattering factor at 0.5,0.0
+x1_A3 mass attenuation coefficient for MoKalpha (cm2 g-1),0.0
+x_r_C2 temperature boiling (K),0.0
+x1_S10 radii atomic (coordination number 12) (pm),0.0
+x1_S13 lattice constant c (pm),0.0
+x_d_S10 radii atomic (coordination number 12) (pm),0.0
+x2_S3 radii covalent (pm),0.0
+x_d_S3 radii covalent (pm),0.0
+x_r_S3 radii covalent (pm),0.0
+x_r_G3 valence electron of orbital p,0.0
+x_d_G3 valence electron of orbital p,0.0
+x_r_A1 atomic number,0.0
+x1_A1 atomic number,0.0
+x_d_G5 valence electron of orbital f,0.0
+x_r_C21 Interfacial energy(mJ/m2),0.0
+x2_C19 diffusion activation energy(kJ mol-1),0.0
+x1_C19 diffusion activation energy(kJ mol-1),0.0
+x_d_C19 diffusion activation energy(kJ mol-1),0.0
+x_r_S18 Slip system,0.0
+x1_S1 coordination number,0.0
+x2_S1 coordination number,0.0
+x_d_S1 coordination number,0.0
+x_r_S1 coordination number,0.0
+x2_G2 valence electron of orbital s,0.0
+x_d_G2 valence electron of orbital s,0.0
+x1_E14 Standard electrode potential(ev),0.0
+x1_C14 diffusion activation energy in Al(kJ mol-1),0.0
+x1_E15 Corrosion potential in seawater(V),0.0
+x_r_E15 Corrosion potential in seawater(V),0.0
+x_d_C21 Interfacial energy(mJ/m2),0.0
+x1_G5 valence electron of orbital f,0.0
+x1_G4 valence electron of orbital d,0.0
+x_d_G4 valence electron of orbital d,0.0
+x_r_G2 valence electron of orbital s,0.0
+x2_G3 valence electron of orbital p,0.0
+x_d_E4 electronegativity absolute  ,0.0
+x1_G2 valence electron of orbital s,0.0
+x_d_E7 energy ionization third (kJ mol-1),0.0
+x_r_E7 energy ionization third (kJ mol-1),0.0
+x1_E7 energy ionization third (kJ mol-1),0.0
+x2_E7 energy ionization third (kJ mol-1),0.0
+x_d_C8 energy cohesive Brewer (J mol-1),0.0
+x1_C8 energy cohesive Brewer (J mol-1),0.0
+x2_C7 enthalpy vacancies Miedema (kJ mol-1),0.0
+x_d_C7 enthalpy vacancies Miedema (kJ mol-1),0.0
+x1_C7 enthalpy vacancies Miedema (kJ mol-1),0.0
+x_r_C5 enthalpy atomization (kJ mol-1),0.0
+x1_C6 enthalpy surface Miedema (kJ mol-1),0.0
+x2_C6 enthalpy surface Miedema (kJ mol-1),0.0
+x2_C5 enthalpy atomization (kJ mol-1),0.0
+x1_C5 enthalpy atomization (kJ mol-1),0.0
+x_r_C4 enthalpy melting (kJ mol-1),0.0
+x_d_C5 enthalpy atomization (kJ mol-1),0.0
+x_d_C4 enthalpy melting (kJ mol-1),0.0
+x2_G1 group number ,0.0
+x_d_C3 enthalpy vaporization (kJ mol-1),0.0
+x2_C4 enthalpy melting (kJ mol-1),0.0
+x_r_E10 nWS1/3 Miedema (a.u.-1/3),0.0
+x1_E11 nuclear charge effective (Slater),0.0
+x_d_E10 nWS1/3 Miedema (a.u.-1/3),0.0
+x2_C3 enthalpy vaporization (kJ mol-1),0.0
+x2_E11 nuclear charge effective (Slater),0.0
+x_d_E11 nuclear charge effective (Slater),0.0
+x1_E12 charge nuclear effective (Clementi),0.0
+x2_E12 charge nuclear effective (Clementi),0.0
+x2_E8 chemical potential Miedema ,0.0
+x1_E8 chemical potential Miedema ,0.0
+x_r_E8 chemical potential Miedema ,0.0
+x_d_E8 chemical potential Miedema ,0.0
+x2_E9 work function (eV),0.0
+x_d_E9 work function (eV),0.0
+x_r_E9 work function (eV),0.0
+x1_E10 nWS1/3 Miedema (a.u.-1/3),0.0
+x_r_S6 distance core electron (Schubert) (A),0.0
+x2_S6 distance core electron (Schubert) (A),0.0
+x1_E4 electronegativity absolute  ,0.0
+x1_E3 electronegativity (Alfred-Rochow)  ,0.0
+x_r_E6 energy ionization second (kJ mol-1),0.0
+x_r_C12 thermal conductivity(W/(m·K)),0.0
+x_d_C17 coefficient of linear thermal expansion(10-6 k-1),0.0
+x_r_C13 poissons ratio,0.0
+x_r_C8 energy cohesive Brewer (J mol-1),0.0
+x_r_C9 modulus compression (GPa),0.0
+x2_C10 modulus bulk (GPa),0.0
+x_d_C9 modulus compression (GPa),0.0
+x_r_C15 diffusion coefficient D0,0.0
+x_d_C15 diffusion coefficient D0,0.0
+x2_C9 modulus compression (GPa),0.0
+x_d_C20 modulus Young (GPa),0.0
+x1_S6 distance core electron (Schubert) (A),0.0
+x1_S5 distance valence electron (Schubert) (A),0.0
+"x_r_S9 atomic environment number (Villars, Daams)",0.0
+"x2_S9 atomic environment number (Villars, Daams)",0.0
+x_r_S17 porosity ,0.0
+x_d_S17 porosity ,0.0
+"x2_S7 volume atom (Villars, Daams) (10-2 nm3)",0.0
+"x_r_S7 volume atom (Villars, Daams) (10-2 nm3)",0.0
+x2_S17 porosity ,0.0
+x1_S17 porosity ,0.0
+"x1_S9 atomic environment number (Villars, Daams)",0.0
+x_r_S8 V2/3 Miedema (cm2),0.0
+x_d_S15 burger vector(pm),0.0
+x1_S15 burger vector(pm),0.0
+x2_S14 velocity of sound(m/s),0.0
+x1_S16 density(g/cm3),0.0
