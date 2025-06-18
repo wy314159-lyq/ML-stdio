@@ -1426,13 +1426,25 @@ class DataModule(QWidget):
                 }
             """)
             
-            # Add to layout before preview
-            preview_index = self.layout.indexOf(self.overview_widget)
-            if preview_index != -1:
-                analysis_label = QLabel("📋 数据质量分析:")
-                analysis_label.setStyleSheet("font-weight: bold; color: #495057; margin-top: 10px;")
-                self.layout.insertWidget(preview_index, analysis_label)
-                self.layout.insertWidget(preview_index + 1, self.analysis_text)
+            # Add to overview widget layout instead of main layout
+            try:
+                # Get the overview widget's layout
+                overview_layout = self.overview_widget.layout()
+                if overview_layout:
+                    # Add analysis before the data table
+                    analysis_label = QLabel("📋 数据质量分析:")
+                    analysis_label.setStyleSheet("font-weight: bold; color: #495057; margin-top: 10px;")
+                    # Insert at the beginning of overview layout
+                    overview_layout.insertWidget(0, analysis_label)
+                    overview_layout.insertWidget(1, self.analysis_text)
+            except Exception as e:
+                # Fallback: just add to overview layout normally
+                overview_layout = self.overview_widget.layout()
+                if overview_layout:
+                    analysis_label = QLabel("📋 数据质量分析:")
+                    analysis_label.setStyleSheet("font-weight: bold; color: #495057; margin-top: 10px;")
+                    overview_layout.addWidget(analysis_label)
+                    overview_layout.addWidget(self.analysis_text)
         
         self.analysis_text.setPlainText(analysis_text) 
 

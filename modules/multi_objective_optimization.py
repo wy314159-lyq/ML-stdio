@@ -1168,8 +1168,32 @@ class MultiObjectiveOptimizationModule(QWidget):
         pipeline = model_data['pipeline']
         feature_names = model_data['metadata']['feature_names']
         
-        # Try to extract original feature ranges from pipeline
-        original_bounds = self.extract_original_ranges(pipeline, feature_names)
+        # PRIORITY 1: Check if feature bounds AND types are saved in metadata (CRITICAL FIX)
+        saved_feature_bounds = model_data['metadata'].get('feature_bounds', None)
+        saved_feature_types = model_data['metadata'].get('feature_types', None)
+        
+        if saved_feature_bounds:
+            # Convert saved bounds to the format expected by PipelineAnalyzer
+            original_bounds = []
+            for feature_name in feature_names:
+                if feature_name in saved_feature_bounds:
+                    original_bounds.append(saved_feature_bounds[feature_name])
+                else:
+                    original_bounds.append((0.0, 1.0))  # Fallback
+            self.log_text.append("✅ Using saved feature bounds from model metadata!")
+            
+            if saved_feature_types:
+                self.log_text.append("✅ Using saved feature types from model metadata!")
+                self.log_text.append(f"   📊 Feature types summary:")
+                type_counts = {}
+                for feature_name in feature_names:
+                    ftype = saved_feature_types.get(feature_name, 'continuous')
+                    type_counts[ftype] = type_counts.get(ftype, 0) + 1
+                for ftype, count in type_counts.items():
+                    self.log_text.append(f"      {ftype}: {count} features")
+        else:
+            # PRIORITY 2: Try to extract original feature ranges from pipeline
+            original_bounds = self.extract_original_ranges(pipeline, feature_names)
         
         # Initialize feature type information
         feature_types = {}
@@ -1178,8 +1202,12 @@ class MultiObjectiveOptimizationModule(QWidget):
         feature_categories = {}
         
         for i, feature_name in enumerate(feature_names):
-            # Default to continuous type
-            feature_type = 'continuous'
+            # PRIORITY 1: Use saved feature type if available
+            if saved_feature_types and feature_name in saved_feature_types:
+                feature_type = saved_feature_types[feature_name]
+            else:
+                # Default to continuous type for backward compatibility
+                feature_type = 'continuous'
             
             # Set bounds based on whether original ranges were detected
             if original_bounds and i < len(original_bounds):
@@ -1213,31 +1241,46 @@ class MultiObjectiveOptimizationModule(QWidget):
             
             categories = None
             
-            # Try to infer feature type from name patterns
-            feature_lower = feature_name.lower()
-            
-            # Check for common categorical patterns
-            if any(pattern in feature_lower for pattern in ['_encoded', '_onehot', '_dummy']):
-                feature_type = 'categorical_encoded'
-                bounds_original = (0, 1)  # Binary encoded features
-                bounds_normalized = (0, 1)
-                categories = [0, 1]
-            elif feature_lower.endswith('_category') or feature_lower.endswith('_class'):
-                feature_type = 'categorical'
-                # For categorical features, we'll need to determine categories later
-                if not original_bounds:
-                    bounds_original = (0, 10)  # Default range, will be updated
+            # Only infer feature type from name patterns if not already saved
+            if not (saved_feature_types and feature_name in saved_feature_types):
+                feature_lower = feature_name.lower()
+                
+                # Check for common categorical patterns
+                if any(pattern in feature_lower for pattern in ['_encoded', '_onehot', '_dummy']):
+                    feature_type = 'categorical_encoded'
+                    bounds_original = (0, 1)  # Binary encoded features
                     bounds_normalized = (0, 1)
-            elif any(pattern in feature_lower for pattern in ['_binary', '_flag', '_indicator']):
-                feature_type = 'binary'
-                bounds_original = (0, 1)
-                bounds_normalized = (0, 1)
+                    categories = [0, 1]
+                elif feature_lower.endswith('_category') or feature_lower.endswith('_class'):
+                    feature_type = 'categorical'
+                    # For categorical features, we'll need to determine categories later
+                    if not original_bounds:
+                        bounds_original = (0, 10)  # Default range, will be updated
+                        bounds_normalized = (0, 1)
+                elif any(pattern in feature_lower for pattern in ['_binary', '_flag', '_indicator']):
+                    feature_type = 'binary'
+                    bounds_original = (0, 1)
+                    bounds_normalized = (0, 1)
+                    categories = [0, 1]
+                elif feature_lower.startswith('is_') or feature_lower.startswith('has_'):
+                    feature_type = 'binary'
+                    bounds_original = (0, 1)
+                    bounds_normalized = (0, 1)
+                    categories = [0, 1]
+            
+            # Handle specific feature types based on saved information or inferred type
+            if feature_type == 'binary':
+                if not original_bounds:
+                    bounds_original = (0, 1)
+                    bounds_normalized = (0, 1)
                 categories = [0, 1]
-            elif feature_lower.startswith('is_') or feature_lower.startswith('has_'):
-                feature_type = 'binary'
-                bounds_original = (0, 1)
-                bounds_normalized = (0, 1)
-                categories = [0, 1]
+            elif feature_type == 'categorical':
+                if not original_bounds:
+                    # Use actual min/max for categorical features if bounds not set
+                    bounds_normalized = (0, 1)
+                # For categorical features, categories will be determined from actual values
+                unique_vals = list(range(int(bounds_original[0]), int(bounds_original[1]) + 1)) if bounds_original else [0, 1]
+                categories = unique_vals
             
             feature_types[feature_name] = feature_type
             feature_bounds[feature_name] = bounds_original
@@ -1253,11 +1296,26 @@ class MultiObjectiveOptimizationModule(QWidget):
         enhanced_data['metadata']['original_ranges_detected'] = original_bounds is not None
         
         # Log the detection results and update status
-        if original_bounds:
+        if saved_feature_bounds:
+            self.log_text.append("   📊 Detailed feature information:")
+            for name in feature_names:
+                bounds = feature_bounds.get(name, (0, 1))
+                ftype = feature_types.get(name, 'continuous')
+                type_marker = {"continuous": "📈", "categorical": "📝", "binary": "🔘"}.get(ftype, "❓")
+                self.log_text.append(f"      {type_marker} {name} ({ftype}): [{bounds[0]:.4f}, {bounds[1]:.4f}]")
+            self.log_text.append("   You can now input physical feature values directly!")
+            
+            # Update status indicator
+            if hasattr(self, 'range_status_label'):
+                self.range_status_label.setText("✅ Metadata available")
+                self.range_status_label.setStyleSheet("color: green; font-weight: bold;")
+        elif original_bounds:
             self.log_text.append("✅ Original feature ranges successfully extracted from pipeline!")
             self.log_text.append("   📊 Feature bounds summary:")
             for i, (name, bounds) in enumerate(zip(feature_names, original_bounds)):
-                self.log_text.append(f"      {name}: [{bounds[0]:.4f}, {bounds[1]:.4f}]")
+                ftype = feature_types.get(name, 'continuous')
+                type_marker = {"continuous": "📈", "categorical": "📝", "binary": "🔘"}.get(ftype, "❓")
+                self.log_text.append(f"      {type_marker} {name} ({ftype}): [{bounds[0]:.4f}, {bounds[1]:.4f}]")
             self.log_text.append("   You can now input physical feature values directly.")
             
             # Update status indicator
@@ -1267,6 +1325,12 @@ class MultiObjectiveOptimizationModule(QWidget):
         else:
             self.log_text.append("⚠️  Could not extract original ranges from pipeline.")
             self.log_text.append("   Using smart defaults based on feature names.")
+            self.log_text.append("   📊 Inferred feature information:")
+            for name in feature_names:
+                bounds = feature_bounds.get(name, (0, 1))
+                ftype = feature_types.get(name, 'continuous')
+                type_marker = {"continuous": "📈", "categorical": "📝", "binary": "🔘"}.get(ftype, "❓")
+                self.log_text.append(f"      {type_marker} {name} ({ftype}): [{bounds[0]:.4f}, {bounds[1]:.4f}]")
             
             # Update status indicator
             if hasattr(self, 'range_status_label'):
@@ -1499,163 +1563,238 @@ class MultiObjectiveOptimizationModule(QWidget):
     
     def update_feature_bounds_table(self):
         """Update the feature bounds table with enhanced type support"""
-        self.feature_table.setRowCount(len(self.combined_features))
-        
-        # Get combined feature metadata
-        combined_feature_info = self.get_combined_feature_info()
-        
-        for i, feature_name in enumerate(self.combined_features):
-            # Feature name (read-only)
-            name_item = QTableWidgetItem(feature_name)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
-            self.feature_table.setItem(i, 0, name_item)
+        try:
+            self.feature_table.setRowCount(len(self.combined_features))
             
-            # Get feature info
-            feature_info = combined_feature_info.get(feature_name, {})
-            feature_type = feature_info.get('type', 'continuous')
-            bounds = feature_info.get('bounds', (0.0, 1.0))
-            categories = feature_info.get('categories', None)
+            # Get combined feature metadata
+            combined_feature_info = self.get_combined_feature_info()
             
-            # Set bounds based on feature type
-            if feature_type in ['binary', 'categorical_encoded']:
-                # For binary/encoded features, use integer bounds
-                min_item = QTableWidgetItem(str(int(bounds[0])))
-                max_item = QTableWidgetItem(str(int(bounds[1])))
-                # Make them read-only since they're fixed by the encoding
-                min_item.setFlags(min_item.flags() & ~Qt.ItemIsEditable)
-                max_item.setFlags(max_item.flags() & ~Qt.ItemIsEditable)
-                min_item.setBackground(Qt.lightGray)
-                max_item.setBackground(Qt.lightGray)
-            elif feature_type == 'categorical':
-                # For categorical features, show category range
-                if categories:
-                    min_item = QTableWidgetItem("0")
-                    max_item = QTableWidgetItem(str(len(categories) - 1))
-                else:
-                    min_item = QTableWidgetItem(str(int(bounds[0])))
-                    max_item = QTableWidgetItem(str(int(bounds[1])))
-                # Make them read-only
-                min_item.setFlags(min_item.flags() & ~Qt.ItemIsEditable)
-                max_item.setFlags(max_item.flags() & ~Qt.ItemIsEditable)
-                min_item.setBackground(Qt.lightGray)
-                max_item.setBackground(Qt.lightGray)
-            else:
-                # Continuous features - editable bounds
-                min_item = QTableWidgetItem(f"{bounds[0]:.2f}")
-                max_item = QTableWidgetItem(f"{bounds[1]:.2f}")
+            for i, feature_name in enumerate(self.combined_features):
+                try:
+                    # Feature name (read-only)
+                    name_item = QTableWidgetItem(feature_name)
+                    name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+                    self.feature_table.setItem(i, 0, name_item)
+                    
+                    # Get feature info
+                    feature_info = combined_feature_info.get(feature_name, {})
+                    feature_type = feature_info.get('type', 'continuous')
+                    bounds = feature_info.get('bounds', (0.0, 1.0))
+                    categories = feature_info.get('categories', None)
+                    
+                    # Set bounds based on feature type
+                    if feature_type in ['binary', 'categorical_encoded']:
+                        # For binary/encoded features, use integer bounds
+                        min_item = QTableWidgetItem(str(int(bounds[0])))
+                        max_item = QTableWidgetItem(str(int(bounds[1])))
+                        # Make them read-only since they're fixed by the encoding
+                        min_item.setFlags(min_item.flags() & ~Qt.ItemIsEditable)
+                        max_item.setFlags(max_item.flags() & ~Qt.ItemIsEditable)
+                        min_item.setBackground(Qt.lightGray)
+                        max_item.setBackground(Qt.lightGray)
+                    elif feature_type == 'categorical':
+                        # For categorical features, show category range
+                        if categories:
+                            min_item = QTableWidgetItem("0")
+                            max_item = QTableWidgetItem(str(len(categories) - 1))
+                        else:
+                            min_item = QTableWidgetItem(str(int(bounds[0])))
+                            max_item = QTableWidgetItem(str(int(bounds[1])))
+                        # Make them read-only
+                        min_item.setFlags(min_item.flags() & ~Qt.ItemIsEditable)
+                        max_item.setFlags(max_item.flags() & ~Qt.ItemIsEditable)
+                        min_item.setBackground(Qt.lightGray)
+                        max_item.setBackground(Qt.lightGray)
+                    else:
+                        # Continuous features - editable bounds
+                        min_item = QTableWidgetItem(f"{bounds[0]:.2f}")
+                        max_item = QTableWidgetItem(f"{bounds[1]:.2f}")
+                    
+                    self.feature_table.setItem(i, 1, min_item)
+                    self.feature_table.setItem(i, 2, max_item)
+                    
+                    # Fixed checkbox
+                    fixed_checkbox = QCheckBox()
+                    fixed_checkbox.stateChanged.connect(lambda state, row=i: self.on_fixed_feature_changed(row, state))
+                    self.feature_table.setCellWidget(i, 3, fixed_checkbox)
+                    
+                    # Fixed value - use appropriate widget based on feature type
+                    if feature_type in ['binary', 'categorical_encoded'] and categories and len(categories) > 0:
+                        # Use combo box for categorical features
+                        try:
+                            fixed_combo = QComboBox()
+                            # Safety check for categories content
+                            valid_categories = [str(cat) for cat in categories if cat is not None]
+                            if valid_categories:
+                                fixed_combo.addItems(valid_categories)
+                                fixed_combo.setEnabled(False)  # Initially disabled
+                                self.feature_table.setCellWidget(i, 4, fixed_combo)
+                            else:
+                                raise ValueError("No valid categories found")
+                        except Exception as e:
+                            print(f"ERROR creating combo box for feature {feature_name}: {e}")
+                            # Fallback to text item
+                            default_value = str(int(bounds[0]))
+                            fixed_value_item = QTableWidgetItem(default_value)
+                            fixed_value_item.setFlags(fixed_value_item.flags() & ~Qt.ItemIsEditable)
+                            fixed_value_item.setBackground(Qt.lightGray)
+                            self.feature_table.setItem(i, 4, fixed_value_item)
+                    elif feature_type == 'categorical' and categories and len(categories) > 0:
+                        # Use combo box for categorical features
+                        try:
+                            fixed_combo = QComboBox()
+                            # Safety check for categories content
+                            valid_categories = [str(cat) for cat in categories if cat is not None]
+                            if valid_categories:
+                                fixed_combo.addItems(valid_categories)
+                                fixed_combo.setEnabled(False)  # Initially disabled
+                                self.feature_table.setCellWidget(i, 4, fixed_combo)
+                            else:
+                                raise ValueError("No valid categories found")
+                        except Exception as e:
+                            print(f"ERROR creating combo box for feature {feature_name}: {e}")
+                            # Fallback to text item
+                            default_value = str(int(bounds[0]))
+                            fixed_value_item = QTableWidgetItem(default_value)
+                            fixed_value_item.setFlags(fixed_value_item.flags() & ~Qt.ItemIsEditable)
+                            fixed_value_item.setBackground(Qt.lightGray)
+                            self.feature_table.setItem(i, 4, fixed_value_item)
+                    else:
+                        # Use text item for continuous features
+                        if feature_type in ['binary', 'categorical_encoded']:
+                            default_value = str(int(bounds[0]))
+                        else:
+                            default_value = f"{(bounds[0] + bounds[1]) / 2:.2f}"
+                        
+                        fixed_value_item = QTableWidgetItem(default_value)
+                        fixed_value_item.setFlags(fixed_value_item.flags() & ~Qt.ItemIsEditable)
+                        fixed_value_item.setBackground(Qt.lightGray)
+                        self.feature_table.setItem(i, 4, fixed_value_item)
+                        
+                except Exception as e:
+                    print(f"ERROR processing feature {feature_name} at row {i}: {e}")
+                    # Continue with next feature instead of crashing
+                    continue
             
-            self.feature_table.setItem(i, 1, min_item)
-            self.feature_table.setItem(i, 2, max_item)
+            # Resize columns
+            self.feature_table.resizeColumnsToContents()
             
-            # Fixed checkbox
-            fixed_checkbox = QCheckBox()
-            fixed_checkbox.stateChanged.connect(lambda state, row=i: self.on_fixed_feature_changed(row, state))
-            self.feature_table.setCellWidget(i, 3, fixed_checkbox)
-            
-            # Fixed value - use appropriate widget based on feature type
-            if feature_type in ['binary', 'categorical_encoded'] and categories:
-                # Use combo box for categorical features
-                fixed_combo = QComboBox()
-                fixed_combo.addItems([str(cat) for cat in categories])
-                fixed_combo.setEnabled(False)  # Initially disabled
-                self.feature_table.setCellWidget(i, 4, fixed_combo)
-            elif feature_type == 'categorical' and categories:
-                # Use combo box for categorical features
-                fixed_combo = QComboBox()
-                fixed_combo.addItems([str(cat) for cat in categories])
-                fixed_combo.setEnabled(False)  # Initially disabled
-                self.feature_table.setCellWidget(i, 4, fixed_combo)
-            else:
-                # Use text item for continuous features
-                if feature_type in ['binary', 'categorical_encoded']:
-                    default_value = str(int(bounds[0]))
-                else:
-                    default_value = f"{(bounds[0] + bounds[1]) / 2:.2f}"
-                
-                fixed_value_item = QTableWidgetItem(default_value)
-                fixed_value_item.setFlags(fixed_value_item.flags() & ~Qt.ItemIsEditable)
-                fixed_value_item.setBackground(Qt.lightGray)
-                self.feature_table.setItem(i, 4, fixed_value_item)
-        
-        # Resize columns
-        self.feature_table.resizeColumnsToContents()
+        except Exception as e:
+            print(f"CRITICAL ERROR in update_feature_bounds_table: {e}")
+            # Log to text area if available
+            if hasattr(self, 'log_text'):
+                self.log_text.append(f"Critical error updating feature table: {str(e)}")
+                self.log_text.append("Please try refreshing the feature bounds or reloading models.")
     
     def get_combined_feature_info(self):
         """Get combined feature information from all loaded models"""
         combined_info = {}
+        
+        # Safety check: ensure we have models_data
+        if not hasattr(self, 'models_data') or not self.models_data:
+            return combined_info
+            
         use_original = self.use_original_ranges_check.isChecked() if hasattr(self, 'use_original_ranges_check') else True
         
         for model_data in self.models_data:
-            if model_data is not None:
-                feature_types = model_data['metadata'].get('feature_types', {})
-                feature_bounds = model_data['metadata'].get('feature_bounds', {})
-                feature_bounds_normalized = model_data['metadata'].get('feature_bounds_normalized', {})
-                feature_categories = model_data['metadata'].get('feature_categories', {})
-                
-                for feature_name in model_data['metadata']['feature_names']:
-                    if feature_name not in combined_info:
-                        # Choose bounds based on range mode
-                        if use_original:
-                            bounds = feature_bounds.get(feature_name, (0.0, 1.0))
-                        else:
-                            bounds = feature_bounds_normalized.get(feature_name, (0.0, 1.0))
-                        
-                        combined_info[feature_name] = {
-                            'type': feature_types.get(feature_name, 'continuous'),
-                            'bounds': bounds,
-                            'bounds_original': feature_bounds.get(feature_name, (0.0, 1.0)),
-                            'bounds_normalized': feature_bounds_normalized.get(feature_name, (0.0, 1.0)),
-                            'categories': feature_categories.get(feature_name, None)
-                        }
+            if model_data is not None and 'metadata' in model_data:
+                try:
+                    metadata = model_data['metadata']
+                    feature_types = metadata.get('feature_types', {})
+                    feature_bounds = metadata.get('feature_bounds', {})
+                    feature_bounds_normalized = metadata.get('feature_bounds_normalized', {})
+                    feature_categories = metadata.get('feature_categories', {})
+                    feature_names = metadata.get('feature_names', [])
+                    
+                    for feature_name in feature_names:
+                        if feature_name not in combined_info:
+                            # Choose bounds based on range mode
+                            if use_original:
+                                bounds = feature_bounds.get(feature_name, (0.0, 1.0))
+                            else:
+                                bounds = feature_bounds_normalized.get(feature_name, (0.0, 1.0))
+                            
+                            combined_info[feature_name] = {
+                                'type': feature_types.get(feature_name, 'continuous'),
+                                'bounds': bounds,
+                                'bounds_original': feature_bounds.get(feature_name, (0.0, 1.0)),
+                                'bounds_normalized': feature_bounds_normalized.get(feature_name, (0.0, 1.0)),
+                                'categories': feature_categories.get(feature_name, None)
+                            }
+                except Exception as e:
+                    print(f"ERROR in get_combined_feature_info for model: {e}")
+                    continue
         
         return combined_info
     
     def on_fixed_feature_changed(self, row, state):
         """Handle fixed feature checkbox change"""
-        is_fixed = state == Qt.Checked
-        
-        # Get feature info
-        feature_name = self.combined_features[row]
-        combined_feature_info = self.get_combined_feature_info()
-        feature_info = combined_feature_info.get(feature_name, {})
-        feature_type = feature_info.get('type', 'continuous')
-        
-        # Handle bounds columns
-        min_item = self.feature_table.item(row, 1)
-        max_item = self.feature_table.item(row, 2)
-        
-        # Check if fixed value is a combo box or text item
-        fixed_value_widget = self.feature_table.cellWidget(row, 4)
-        fixed_value_item = self.feature_table.item(row, 4)
-        
-        if is_fixed:
-            # Disable bounds (if they were editable)
-            if feature_type == 'continuous':
-                min_item.setFlags(min_item.flags() & ~Qt.ItemIsEditable)
-                max_item.setFlags(max_item.flags() & ~Qt.ItemIsEditable)
-                min_item.setBackground(Qt.lightGray)
-                max_item.setBackground(Qt.lightGray)
+        try:
+            is_fixed = state == Qt.Checked
             
-            # Enable fixed value
-            if fixed_value_widget:  # Combo box
-                fixed_value_widget.setEnabled(True)
-            elif fixed_value_item:  # Text item
-                fixed_value_item.setFlags(fixed_value_item.flags() | Qt.ItemIsEditable)
-                fixed_value_item.setBackground(Qt.white)
-        else:
-            # Enable bounds (if they should be editable)
-            if feature_type == 'continuous':
-                min_item.setFlags(min_item.flags() | Qt.ItemIsEditable)
-                max_item.setFlags(max_item.flags() | Qt.ItemIsEditable)
-                min_item.setBackground(Qt.white)
-                max_item.setBackground(Qt.white)
+            # Safety check: ensure we have combined_features and valid row index
+            if not hasattr(self, 'combined_features') or row >= len(self.combined_features):
+                print(f"ERROR: Invalid row {row} or missing combined_features")
+                return
             
-            # Disable fixed value
-            if fixed_value_widget:  # Combo box
-                fixed_value_widget.setEnabled(False)
-            elif fixed_value_item:  # Text item
-                            fixed_value_item.setFlags(fixed_value_item.flags() & ~Qt.ItemIsEditable)
-            fixed_value_item.setBackground(Qt.lightGray)
+            # Get feature info with safety checks
+            feature_name = self.combined_features[row]
+            combined_feature_info = self.get_combined_feature_info()
+            feature_info = combined_feature_info.get(feature_name, {})
+            feature_type = feature_info.get('type', 'continuous')
+            
+            # Safety check: ensure table items exist
+            if self.feature_table.rowCount() <= row:
+                print(f"ERROR: Row {row} does not exist in feature table")
+                return
+                
+            # Handle bounds columns with safety checks
+            min_item = self.feature_table.item(row, 1)
+            max_item = self.feature_table.item(row, 2)
+            
+            if min_item is None or max_item is None:
+                print(f"ERROR: Missing bounds items for row {row}")
+                return
+            
+            # Check if fixed value is a combo box or text item
+            fixed_value_widget = self.feature_table.cellWidget(row, 4)
+            fixed_value_item = self.feature_table.item(row, 4)
+            
+            if is_fixed:
+                # Disable bounds (if they were editable)
+                if feature_type == 'continuous':
+                    min_item.setFlags(min_item.flags() & ~Qt.ItemIsEditable)
+                    max_item.setFlags(max_item.flags() & ~Qt.ItemIsEditable)
+                    min_item.setBackground(Qt.lightGray)
+                    max_item.setBackground(Qt.lightGray)
+                
+                # Enable fixed value
+                if fixed_value_widget:  # Combo box
+                    fixed_value_widget.setEnabled(True)
+                elif fixed_value_item:  # Text item
+                    fixed_value_item.setFlags(fixed_value_item.flags() | Qt.ItemIsEditable)
+                    fixed_value_item.setBackground(Qt.white)
+            else:
+                # Enable bounds (if they should be editable)
+                if feature_type == 'continuous':
+                    min_item.setFlags(min_item.flags() | Qt.ItemIsEditable)
+                    max_item.setFlags(max_item.flags() | Qt.ItemIsEditable)
+                    min_item.setBackground(Qt.white)
+                    max_item.setBackground(Qt.white)
+                
+                # Disable fixed value
+                if fixed_value_widget:  # Combo box
+                    fixed_value_widget.setEnabled(False)
+                elif fixed_value_item:  # Text item
+                    fixed_value_item.setFlags(fixed_value_item.flags() & ~Qt.ItemIsEditable)
+                    fixed_value_item.setBackground(Qt.lightGray)
+                    
+        except Exception as e:
+            print(f"ERROR in on_fixed_feature_changed: {e}")
+            # Log to text area if available
+            if hasattr(self, 'log_text'):
+                self.log_text.append(f"Error in feature fix/unfix operation: {str(e)}")
+            # Don't re-raise the exception to prevent crashes
     
     def on_auto_mutation_changed(self, state):
         """Handle auto mutation probability checkbox change"""

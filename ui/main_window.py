@@ -162,10 +162,10 @@ class MatSciMLStudioWindow(QMainWindow):
         # Initially disable some modules
         self.set_module_enabled(3, False)  # Feature Selection
         self.set_module_enabled(4, False)  # Model Training
-        self.set_module_enabled(5, False)  # Prediction
+        # self.set_module_enabled(5, False)  # Prediction - Keep enabled for independent use
         self.set_module_enabled(8, False)  # SHAP Analysis
         self.set_module_enabled(9, False)  # Target Optimization
-        # Multi-Objective Optimization is always enabled (independent module)
+        # Prediction and Multi-Objective Optimization are always enabled (independent modules)
         
     def connect_modules(self):
         """Connect signals between modules"""
@@ -187,9 +187,9 @@ class MatSciMLStudioWindow(QMainWindow):
         self.feature_module.features_ready.connect(self.safe_set_training_data)
         self.feature_module.features_ready.connect(lambda: self.set_module_enabled(4, True))  # Enable Training
         
-        # Training module -> Prediction module
+        # Training module -> Prediction module (pass model to already-enabled prediction module)
         self.training_module.model_ready.connect(self.prediction_module.set_model)
-        self.training_module.model_ready.connect(lambda: self.set_module_enabled(5, True))  # Enable Prediction
+        # Note: Prediction module is already enabled for independent use
         
         # Training module -> SHAP Analysis and Target Optimization
         self.training_module.model_ready.connect(self.shap_analysis.set_model)
@@ -323,10 +323,10 @@ class MatSciMLStudioWindow(QMainWindow):
             self.shap_analysis.reset()
             self.target_optimization.reset()
             
-            # Disable modules 3-9
+            # Disable modules 3-9 (except Prediction which stays enabled)
             self.set_module_enabled(3, False)  # Feature Selection
             self.set_module_enabled(4, False)  # Model Training
-            self.set_module_enabled(5, False)  # Prediction
+            # self.set_module_enabled(5, False)  # Prediction - Keep enabled for independent use
             self.set_module_enabled(8, False)  # SHAP Analysis
             self.set_module_enabled(9, False)  # Target Optimization
             

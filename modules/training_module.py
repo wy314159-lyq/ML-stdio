@@ -2047,6 +2047,45 @@ class TrainingModule(QWidget):
                 if not file_path.endswith('.joblib'):
                     file_path += '.joblib'
                     
+                # CRITICAL FIX: Extract and save original feature ranges AND types for multi-objective optimization
+                feature_bounds = {}
+                feature_types = {}
+                
+                # Reproduce the same feature categorization logic used during training
+                numeric_features = self.X.select_dtypes(include=[np.number]).columns.tolist()
+                categorical_features = self.X.select_dtypes(include=['object', 'category']).columns.tolist()
+                
+                # Identify boolean features (from one-hot encoding)
+                boolean_features = []
+                for col in numeric_features:
+                    unique_vals = self.X[col].dropna().unique()
+                    if len(unique_vals) <= 2 and set(unique_vals).issubset({0, 1, 0.0, 1.0, True, False}):
+                        boolean_features.append(col)
+                
+                # Include actual boolean columns
+                actual_bool_features = self.X.select_dtypes(include='bool').columns.tolist()
+                boolean_features.extend(actual_bool_features)
+                boolean_features = list(set(boolean_features))
+                
+                # Remove boolean features from numeric features
+                numeric_features = [col for col in numeric_features if col not in boolean_features]
+                
+                # Save feature bounds and types
+                for feature_name in self.X.columns:
+                    min_val = float(self.X[feature_name].min())
+                    max_val = float(self.X[feature_name].max())
+                    feature_bounds[feature_name] = (min_val, max_val)
+                    
+                    # Determine feature type
+                    if feature_name in numeric_features:
+                        feature_types[feature_name] = 'continuous'
+                    elif feature_name in categorical_features:
+                        feature_types[feature_name] = 'categorical'
+                    elif feature_name in boolean_features:
+                        feature_types[feature_name] = 'binary'
+                    else:
+                        feature_types[feature_name] = 'continuous'  # fallback
+                
                 # Prepare metadata in the format expected by multi_objective_optimization.py
                 metadata = {
                     'feature_names': self.X.columns.tolist(),
@@ -2058,7 +2097,9 @@ class TrainingModule(QWidget):
                     'n_features': len(self.X.columns),
                     'n_samples': len(self.X),
                     'save_timestamp': pd.Timestamp.now().isoformat(),  # 保存时间戳
-                    'model_name': self.model_combo.currentText() if hasattr(self, 'model_combo') else 'unknown'  # 模型名称
+                    'model_name': self.model_combo.currentText() if hasattr(self, 'model_combo') else 'unknown',  # 模型名称
+                    'feature_bounds': feature_bounds,  # 原始特征边界 - 关键修复！
+                    'feature_types': feature_types  # 特征类型 (continuous/categorical/binary) - 新增！
                 }
                 
                 # Save model with structured metadata

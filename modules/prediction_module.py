@@ -252,8 +252,11 @@ class PredictionModule(QWidget):
         # Store reference to right panel
         self.right_panel = right_panel
         
-        # Initially disable the module
-        self.setEnabled(False)
+        # Enable the module from start (allow independent use)
+        self.setEnabled(True)
+        
+        # Enable model loading section immediately
+        self.enable_model_loading_section()
         
     def set_model(self, trained_model):
         """Set the trained model for prediction with enhanced feature name handling"""
@@ -312,7 +315,7 @@ class PredictionModule(QWidget):
         # Enable UI components
         self.model_info_group.setEnabled(True)
         self.prediction_mode_group.setEnabled(True)
-        self.load_current_btn.setEnabled(True)
+        self.load_current_btn.setEnabled(True)  # Enable since we now have a current session model
         
         # Update mode visibility
         self.on_mode_changed()
@@ -936,6 +939,7 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
             # Enable UI components
             self.model_info_group.setEnabled(True)
             self.prediction_mode_group.setEnabled(True)
+            self.load_current_btn.setEnabled(True)  # Enable since we now have a current session model
             self.on_mode_changed()
             
             self.progress_updated.emit(100)
@@ -1262,5 +1266,33 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
         self.export_csv_btn.setEnabled(False)
         self.export_excel_btn.setEnabled(False)
         
-        self.setEnabled(False)
-        self.status_updated.emit("Prediction module reset") 
+        self.setEnabled(True)  # Keep module enabled for independent use
+        
+        # Re-enable model loading section
+        self.enable_model_loading_section()
+        
+        self.status_updated.emit("Prediction module reset")
+    
+    def enable_model_loading_section(self):
+        """Enable model loading section for independent use"""
+        # Model loading is always available
+        # Only disable prediction-related sections until model is loaded
+        
+        # Keep model loading section enabled
+        # (model loading group is already enabled by default)
+        
+        # Initially disable other sections until model is loaded
+        self.model_info_group.setEnabled(False)
+        self.prediction_mode_group.setEnabled(False)
+        self.data_import_group.setEnabled(False)
+        self.manual_input_group.setEnabled(False)
+        self.prediction_group.setEnabled(False)
+        self.export_group.setEnabled(False)
+        
+        # Enable current session button only if there's a model
+        self.load_current_btn.setEnabled(self.trained_model is not None)
+        
+        # Disable prediction-related buttons until model is ready
+        self.predict_btn.setEnabled(False)
+        self.export_csv_btn.setEnabled(False)
+        self.export_excel_btn.setEnabled(False) 
