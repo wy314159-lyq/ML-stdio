@@ -19,6 +19,7 @@ from modules.advanced_preprocessing import AdvancedPreprocessing
 from modules.collaboration_version_control import CollaborationWidget
 from modules.shap_analysis import SHAPAnalysisModule
 from modules.target_optimization import TargetOptimizationModule
+from modules.multi_objective_optimization import MultiObjectiveOptimizationModule
 
 
 class MatSciMLStudioWindow(QMainWindow):
@@ -151,6 +152,10 @@ class MatSciMLStudioWindow(QMainWindow):
         self.target_optimization = TargetOptimizationModule()
         self.tab_widget.addTab(self.target_optimization, "🎯 Target Optimization")
         
+        # Module 11: Multi-Objective Optimization
+        self.multi_objective_optimization = MultiObjectiveOptimizationModule()
+        self.tab_widget.addTab(self.multi_objective_optimization, "🔄 Multi-Objective Optimization")
+        
         # Connect modules
         self.connect_modules()
         
@@ -160,6 +165,7 @@ class MatSciMLStudioWindow(QMainWindow):
         self.set_module_enabled(5, False)  # Prediction
         self.set_module_enabled(8, False)  # SHAP Analysis
         self.set_module_enabled(9, False)  # Target Optimization
+        # Multi-Objective Optimization is always enabled (independent module)
         
     def connect_modules(self):
         """Connect signals between modules"""
@@ -190,6 +196,7 @@ class MatSciMLStudioWindow(QMainWindow):
         self.training_module.model_ready.connect(self.target_optimization.set_model)
         self.training_module.model_ready.connect(lambda: self.set_module_enabled(8, True))  # Enable SHAP Analysis
         self.training_module.model_ready.connect(lambda: self.set_module_enabled(9, True))  # Enable Target Optimization
+        # Multi-Objective Optimization is independent and doesn't need model_ready signal
         
         # Also pass training data to SHAP analysis (with safe wrapper)
         self.feature_module.features_ready.connect(self.safe_set_shap_data)

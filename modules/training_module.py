@@ -2047,12 +2047,24 @@ class TrainingModule(QWidget):
                 if not file_path.endswith('.joblib'):
                     file_path += '.joblib'
                     
-                # Save model with metadata
-                model_data = {
-                    'pipeline': self.trained_pipeline,
+                # Prepare metadata in the format expected by multi_objective_optimization.py
+                metadata = {
                     'feature_names': self.X.columns.tolist(),
                     'task_type': self.task_type,
-                    'metrics': self.evaluation_results['metrics'] if hasattr(self, 'evaluation_results') else None
+                    'target_name': self.y.name if self.y.name else 'target',  # 目标变量名称
+                    'metrics': self.evaluation_results['metrics'] if hasattr(self, 'evaluation_results') and self.evaluation_results else None,
+                    'class_names': self.class_names if hasattr(self, 'class_names') and self.class_names is not None else None,  # 分类模型的类名
+                    'label_encoder': self.label_encoder if hasattr(self, 'label_encoder') and self.label_encoder is not None else None,  # 标签编码器
+                    'n_features': len(self.X.columns),
+                    'n_samples': len(self.X),
+                    'save_timestamp': pd.Timestamp.now().isoformat(),  # 保存时间戳
+                    'model_name': self.model_combo.currentText() if hasattr(self, 'model_combo') else 'unknown'  # 模型名称
+                }
+                
+                # Save model with structured metadata
+                model_data = {
+                    'pipeline': self.trained_pipeline,
+                    'metadata': metadata
                 }
                 
                 joblib.dump(model_data, file_path)
