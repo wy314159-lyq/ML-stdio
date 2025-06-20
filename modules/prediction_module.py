@@ -35,6 +35,8 @@ class PredictionModule(QWidget):
         self.predictions = None
         self.feature_names = []
         self.feature_inputs = {}  # Store feature input widgets
+        self.feature_types = {}
+        self.feature_bounds = {}
         
         self.init_ui()
         
@@ -433,12 +435,38 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
                 info_parts.append(f"{i}. {step}")
             info_parts.append("")
         
-        # Feature Information
+        # Enhanced Feature Information with Types and Bounds
         if self.feature_names:
-            info_parts.append("FEATURE NAMES (in order):")
-            info_parts.append("-" * 30)
+            info_parts.append("FEATURE INFORMATION:")
+            info_parts.append("-" * 40)
+            
+            # Feature type summary if available
+            if self.feature_types:
+                type_counts = {}
+                for ftype in self.feature_types.values():
+                    type_counts[ftype] = type_counts.get(ftype, 0) + 1
+                
+                info_parts.append("Feature Type Summary:")
+                for ftype, count in sorted(type_counts.items()):
+                    type_icon = {'continuous': '📈', 'binary': '🔘', 'categorical': '📝'}.get(ftype, '📊')
+                    info_parts.append(f"  {type_icon} {ftype.title()}: {count} features")
+                info_parts.append("")
+            
+            # Detailed feature list
+            info_parts.append("Feature Details:")
             for i, feature in enumerate(self.feature_names, 1):
-                info_parts.append(f"{i:2d}. {feature}")
+                # Get feature type and bounds if available
+                ftype = self.feature_types.get(feature, 'unknown') if self.feature_types else 'unknown'
+                bounds = self.feature_bounds.get(feature) if self.feature_bounds else None
+                
+                type_icon = {'continuous': '📈', 'binary': '🔘', 'categorical': '📝'}.get(ftype, '📊')
+                
+                if bounds:
+                    bounds_str = f" [{bounds[0]:.2f} to {bounds[1]:.2f}]"
+                else:
+                    bounds_str = ""
+                
+                info_parts.append(f"{i:2d}. {type_icon} {feature} ({ftype}){bounds_str}")
             info_parts.append("")
         
         # Preprocessing Information
@@ -452,6 +480,24 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
                 for transformer in prep_info['transformers']:
                     info_parts.append(f"  - {transformer}")
             info_parts.append("")
+        
+        # Additional Metadata from Training Module
+        if self.model_metadata:
+            if 'save_timestamp' in self.model_metadata:
+                info_parts.append("TRAINING METADATA:")
+                info_parts.append("-" * 30)
+                info_parts.append(f"Save Timestamp: {self.model_metadata['save_timestamp']}")
+                
+                if 'model_name' in self.model_metadata:
+                    info_parts.append(f"Model Algorithm: {self.model_metadata['model_name']}")
+                
+                if 'target_name' in self.model_metadata:
+                    info_parts.append(f"Target Variable: {self.model_metadata['target_name']}")
+                
+                if 'n_samples' in self.model_metadata:
+                    info_parts.append(f"Training Samples: {self.model_metadata['n_samples']}")
+                
+                info_parts.append("")
         
         # Model Parameters
         if self.model_metadata['model_params']:
@@ -737,17 +783,30 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
         
         from PyQt5.QtWidgets import QComboBox, QCheckBox, QDoubleSpinBox
         
-        # Collect input values
+        # Collect input values with enhanced type handling
         input_data = {}
         for feature_name, input_widget in self.feature_inputs.items():
             if isinstance(input_widget, QDoubleSpinBox):
-                input_data[feature_name] = input_widget.value()
+                input_data[feature_name] = float(input_widget.value())
             elif isinstance(input_widget, QCheckBox):
-                input_data[feature_name] = input_widget.isChecked()
+                # Convert checkbox to 0/1 integer
+                input_data[feature_name] = 1 if input_widget.isChecked() else 0
             elif isinstance(input_widget, QComboBox):
-                input_data[feature_name] = input_widget.currentText()
+                # Convert combobox selection to appropriate numeric value
+                try:
+                    # Try to convert to integer first (for categorical features)
+                    input_data[feature_name] = int(input_widget.currentText())
+                except ValueError:
+                    # If not integer, try float
+                    try:
+                        input_data[feature_name] = float(input_widget.currentText())
+                    except ValueError:
+                        # If neither, default to 0
+                        input_data[feature_name] = 0
             else:
                 input_data[feature_name] = 0.0  # Fallback
+        
+        print(f"[DEBUG] Manual input data collected: {input_data}")
         
         # **CRITICAL FIX**: Try to map original features to encoded format with enhanced error handling
         try:
@@ -900,7 +959,7 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
             self.model_path_edit.setText(file_path)
             
     def load_model_from_file(self):
-        """Load model from file"""
+        """Load model from file with enhanced metadata support"""
         file_path = self.model_path_edit.text()
         
         if not file_path:
@@ -914,11 +973,50 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
             # Load model
             model_data = joblib.load(file_path)
             
+            # Reset metadata
+            self.model_metadata = {}
+            self.feature_types = {}
+            self.feature_bounds = {}
+            
             # Handle different save formats
             if isinstance(model_data, dict):
                 self.trained_model = model_data.get('pipeline', model_data.get('model'))
-                # Try to get feature names from metadata
-                if 'feature_names' in model_data:
+                
+                # Extract metadata with enhanced support for training module format
+                metadata = model_data.get('metadata', {})
+                if metadata:
+                    # Get feature names
+                    if 'feature_names' in metadata:
+                        self.feature_names = metadata['feature_names']
+                        self.status_updated.emit("✅ Feature names loaded from metadata")
+                    
+                    # Get feature types (NEW!)
+                    if 'feature_types' in metadata:
+                        self.feature_types = metadata['feature_types']
+                        self.status_updated.emit(f"✅ Feature types loaded: {len(self.feature_types)} features")
+                        
+                        # Log feature type summary
+                        type_counts = {}
+                        for ftype in self.feature_types.values():
+                            type_counts[ftype] = type_counts.get(ftype, 0) + 1
+                        print(f"[INFO] Feature types summary: {type_counts}")
+                    
+                    # Get feature bounds (NEW!)
+                    if 'feature_bounds' in metadata:
+                        self.feature_bounds = metadata['feature_bounds']
+                        self.status_updated.emit(f"✅ Feature bounds loaded: {len(self.feature_bounds)} features")
+                        
+                        # Log some feature bounds examples
+                        feature_names_sample = list(self.feature_bounds.keys())[:3]
+                        for fname in feature_names_sample:
+                            bounds = self.feature_bounds[fname]
+                            print(f"[INFO] {fname}: {bounds[0]:.2f} to {bounds[1]:.2f}")
+                    
+                    # Store additional metadata
+                    self.model_metadata.update(metadata)
+                    
+                # Fallback for older format
+                elif 'feature_names' in model_data:
                     self.feature_names = model_data['feature_names']
             else:
                 self.trained_model = model_data
@@ -930,16 +1028,16 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
             
             self.progress_updated.emit(90)
             
-            # Update display
+            # Update display with enhanced information
             self.update_model_info_display()
             
-            # Setup manual input interface
-            self.setup_manual_input_interface()
+            # Setup manual input interface with feature type support
+            self.setup_enhanced_manual_input_interface()
             
             # Enable UI components
             self.model_info_group.setEnabled(True)
             self.prediction_mode_group.setEnabled(True)
-            self.load_current_btn.setEnabled(True)  # Enable since we now have a current session model
+            self.load_current_btn.setEnabled(True)
             self.on_mode_changed()
             
             self.progress_updated.emit(100)
@@ -1241,6 +1339,8 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
         self.predictions = None
         self.feature_names = []
         self.feature_inputs = {}
+        self.feature_types = {}
+        self.feature_bounds = {}
         
         # Reset UI
         self.model_info_text.clear()
@@ -1295,4 +1395,101 @@ Pipeline: {'Yes' if self.model_metadata['pipeline_steps'] else 'No'}"""
         # Disable prediction-related buttons until model is ready
         self.predict_btn.setEnabled(False)
         self.export_csv_btn.setEnabled(False)
-        self.export_excel_btn.setEnabled(False) 
+        self.export_excel_btn.setEnabled(False)
+    
+    def setup_enhanced_manual_input_interface(self):
+        """Setup enhanced manual input interface based on feature types and bounds"""
+        # Clear existing widgets
+        for i in reversed(range(self.feature_layout.count())):
+            self.feature_layout.itemAt(i).widget().setParent(None)
+        
+        self.feature_inputs = {}
+        
+        # Check if we have feature types information
+        if self.feature_types and self.feature_names:
+            self.status_updated.emit("📋 Setting up interface with feature type information...")
+            self.setup_typed_feature_interface()
+        else:
+            # Fallback to original setup
+            self.status_updated.emit("📋 Setting up standard interface...")
+            self.setup_manual_input_interface()
+    
+    def setup_typed_feature_interface(self):
+        """Setup interface using feature type information"""
+        from PyQt5.QtWidgets import QComboBox, QCheckBox
+        
+        # Debug: Print feature types and bounds for analysis
+        print(f"[DEBUG] Setting up typed interface with {len(self.feature_names)} features")
+        print(f"[DEBUG] Feature types available: {bool(self.feature_types)}")
+        print(f"[DEBUG] Feature bounds available: {bool(self.feature_bounds)}")
+        
+        if self.feature_types:
+            print(f"[DEBUG] Feature types summary:")
+            type_counts = {}
+            for fname, ftype in self.feature_types.items():
+                type_counts[ftype] = type_counts.get(ftype, 0) + 1
+                if fname in ['SMOKING_1', 'THROAT_DISCOMFORT_1', 'BREATHING_ISSUE_0', 'SMOKING_FAMILY_HISTORY_0']:
+                    print(f"[DEBUG]   {fname}: {ftype}")
+            print(f"[DEBUG] Type distribution: {type_counts}")
+        
+        for i, feature_name in enumerate(self.feature_names):
+            # Get feature information
+            feature_type = self.feature_types.get(feature_name, 'continuous')
+            feature_bounds = self.feature_bounds.get(feature_name, (0.0, 1.0))
+            
+            print(f"[DEBUG] Feature {i}: {feature_name} -> type={feature_type}, bounds={feature_bounds}")
+            
+            # Create feature label with type indicator
+            type_icon = {'continuous': '📈', 'binary': '🔘', 'categorical': '📝'}.get(feature_type, '📊')
+            label = QLabel(f"{type_icon} {feature_name}:")
+            label.setMinimumWidth(150)
+            
+            # Create appropriate input widget based on feature type
+            if feature_type == 'binary':
+                # Binary feature: use checkbox
+                input_widget = QCheckBox()
+                input_widget.setChecked(False)  # Default to False
+                input_widget.setToolTip(f"Binary feature: 0 or 1\nRange: {feature_bounds[0]} to {feature_bounds[1]}")
+                print(f"[DEBUG] Created CHECKBOX for {feature_name}")
+                
+            elif feature_type == 'categorical':
+                # Categorical feature: use combobox with valid values
+                input_widget = QComboBox()
+                
+                # Generate valid integer values within bounds
+                min_val, max_val = feature_bounds
+                valid_values = list(range(int(min_val), int(max_val) + 1))
+                input_widget.addItems([str(v) for v in valid_values])
+                input_widget.setCurrentIndex(0)  # Default to first value
+                input_widget.setToolTip(f"Categorical feature\nValid values: {valid_values}\nRange: {feature_bounds[0]} to {feature_bounds[1]}")
+                input_widget.setMinimumWidth(120)
+                print(f"[DEBUG] Created COMBOBOX for {feature_name}")
+                
+            else:  # continuous
+                # Continuous feature: use double spinbox
+                input_widget = QDoubleSpinBox()
+                min_val, max_val = feature_bounds
+                
+                # Set bounds with some padding
+                padding = (max_val - min_val) * 0.1 if max_val > min_val else 1.0
+                input_widget.setMinimum(min_val - padding)
+                input_widget.setMaximum(max_val + padding)
+                input_widget.setDecimals(6)
+                
+                # Set default value to middle of range
+                default_val = (min_val + max_val) / 2
+                input_widget.setValue(default_val)
+                input_widget.setMinimumWidth(120)
+                input_widget.setToolTip(f"Continuous feature\nOriginal range: {min_val:.2f} to {max_val:.2f}\nDefault: {default_val:.2f}")
+                print(f"[DEBUG] Created DOUBLESPINBOX for {feature_name}")
+            
+            # Add to layout
+            row = i
+            self.feature_layout.addWidget(label, row, 0)
+            self.feature_layout.addWidget(input_widget, row, 1)
+            
+            # Store reference
+            self.feature_inputs[feature_name] = input_widget
+        
+        print(f"[SUCCESS] Created enhanced interface with {len(self.feature_names)} features")
+        self.status_updated.emit(f"✅ Enhanced interface ready: {len(self.feature_names)} features with type information") 

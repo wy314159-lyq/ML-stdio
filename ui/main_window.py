@@ -177,8 +177,8 @@ class MatSciMLStudioWindow(QMainWindow):
         # Intelligent Wizard -> Other modules
         self.intelligent_wizard.configuration_ready.connect(self.apply_wizard_configuration)
         
-        # Advanced Preprocessing -> Feature module
-        self.advanced_preprocessing.preprocessing_completed.connect(self.feature_module.set_data)
+        # Advanced Preprocessing -> Feature module (with safe wrapper)
+        self.advanced_preprocessing.preprocessing_completed.connect(self.safe_set_feature_data)
         
         # Data/Preprocessing -> Feature module
         self.data_module.data_ready.connect(self.feature_module.set_data)
@@ -235,6 +235,23 @@ class MatSciMLStudioWindow(QMainWindow):
         
         # Performance alerts
         self.performance_monitor.performance_alert.connect(self.handle_performance_alert)
+    
+    def safe_set_feature_data(self, X, y):
+        """Safely set feature data with error handling"""
+        try:
+            print("=== SAFE FEATURE DATA TRANSFER FROM PREPROCESSING ===")
+            print(f"Transferring data: X shape {X.shape}, y shape {y.shape}")
+            self.feature_module.set_data(X, y)
+            print("✓ Feature data transfer from preprocessing successful")
+        except Exception as e:
+            print(f"ERROR in safe_set_feature_data: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Data Transfer Error", 
+                               f"Failed to transfer preprocessed data to feature module:\n{str(e)}\n\n"
+                               f"Please try the following:\n"
+                               f"1. Check if preprocessing was completed successfully\n"
+                               f"2. Restart the application if the issue persists")
         
     def safe_set_training_data(self, X, y, config):
         """Safely set training data with error handling"""

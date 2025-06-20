@@ -819,18 +819,18 @@ class TrainingModule(QWidget):
                 # Alert if there's a significant difference
                 score_diff = abs(cv_score - test_score)
                 if score_diff > 0.1:  # More than 10% difference
-                    warning_msg = f"⚠️ 性能差异警告:\n"
-                    warning_msg += f"交叉验证分数: {cv_score:.4f}\n"
-                    warning_msg += f"测试集分数: {test_score:.4f}\n"
-                    warning_msg += f"差异: {score_diff:.4f}\n\n"
-                    warning_msg += f"可能原因:\n"
-                    warning_msg += f"1. 数据分布不均匀\n"
-                    warning_msg += f"2. 测试集太小\n"
-                    warning_msg += f"3. 过拟合到交叉验证策略\n\n"
-                    warning_msg += f"建议: 尝试不同的random_state或增加数据量"
+                    warning_msg = f"⚠️ Performance Difference Warning:\n"
+                    warning_msg += f"Cross validation score: {cv_score:.4f}\n"
+                    warning_msg += f"Test set score: {test_score:.4f}\n"
+                    warning_msg += f"Difference: {score_diff:.4f}\n\n"
+                    warning_msg += f"Possible reasons:\n"
+                    warning_msg += f"1. Data distribution is not uniform\n"
+                    warning_msg += f"2. Test set is too small\n"
+                    warning_msg += f"3. Overfitting to cross-validation strategy\n\n"
+                    warning_msg += f"Suggestions: Try different random_state or increase data size"
                     
-                    QMessageBox.warning(self, "性能差异警告", warning_msg)
-                    self.status_updated.emit(f"CV分数: {cv_score:.4f}, 测试分数: {test_score:.4f}")
+                    QMessageBox.warning(self, "Performance Difference Warning", warning_msg)
+                    self.status_updated.emit(f"CV score: {cv_score:.4f}, Test score: {test_score:.4f}")
             
             # Store results
             eval_results = {
@@ -848,8 +848,8 @@ class TrainingModule(QWidget):
             
             # Enhanced evaluation based on strategy
             eval_strategy = self.eval_strategy_combo.currentText()
-            if eval_strategy == "多次划分验证 (推荐)":
-                self.status_updated.emit("正在进行多次划分验证...")
+            if eval_strategy == "Multiple Split Validation (Recommended) ":
+                self.status_updated.emit("Performing multiple split validation...")
                 multiple_scores = self.perform_multiple_split_validation(
                     self.trained_pipeline, self.X, self.y, task_type
                 )
@@ -857,16 +857,16 @@ class TrainingModule(QWidget):
                 eval_results['robust_score'] = np.mean(multiple_scores)
                 eval_results['score_std'] = np.std(multiple_scores)
                 
-                self.status_updated.emit(f"多次验证平均分数: {eval_results['robust_score']:.4f} ± {eval_results['score_std']:.4f}")
+                self.status_updated.emit(f"Multiple split validation average score: {eval_results['robust_score']:.4f} ± {eval_results['score_std']:.4f}")
                 
-            elif eval_strategy == "嵌套交叉验证 (最可靠)":
-                self.status_updated.emit("正在进行嵌套交叉验证...")
+            elif eval_strategy == "Nested Cross Validation (Most Reliable)":
+                self.status_updated.emit("Performing nested cross validation...")
                 nested_score = self.perform_nested_cv_validation(
                     pipeline, self.X, self.y, task_type, param_grid_prefixed if self.enable_hpo.isChecked() else None
                 )
                 eval_results['nested_cv_score'] = nested_score
                 
-                self.status_updated.emit(f"嵌套交叉验证分数: {nested_score:.4f}")
+                self.status_updated.emit(f"Nested cross validation score: {nested_score:.4f}")
             
             self.evaluation_results = eval_results
             
@@ -2055,20 +2055,38 @@ class TrainingModule(QWidget):
                 numeric_features = self.X.select_dtypes(include=[np.number]).columns.tolist()
                 categorical_features = self.X.select_dtypes(include=['object', 'category']).columns.tolist()
                 
+                # Debug: Print initial feature categorization
+                print(f"[DEBUG] Initial numeric features: {len(numeric_features)}")
+                print(f"[DEBUG] Initial categorical features: {len(categorical_features)}")
+                
                 # Identify boolean features (from one-hot encoding)
                 boolean_features = []
                 for col in numeric_features:
                     unique_vals = self.X[col].dropna().unique()
-                    if len(unique_vals) <= 2 and set(unique_vals).issubset({0, 1, 0.0, 1.0, True, False}):
+                    unique_set = set(unique_vals)
+                    
+                    print(f"[DEBUG] {col}: unique_vals = {sorted(unique_vals)}, set = {unique_set}")
+                    
+                    if len(unique_vals) <= 2 and unique_set.issubset({0, 1, 0.0, 1.0, True, False}):
                         boolean_features.append(col)
+                        print(f"[DEBUG] -> Identified as BINARY: {col}")
+                    else:
+                        print(f"[DEBUG] -> Identified as CONTINUOUS: {col}")
                 
                 # Include actual boolean columns
                 actual_bool_features = self.X.select_dtypes(include='bool').columns.tolist()
                 boolean_features.extend(actual_bool_features)
                 boolean_features = list(set(boolean_features))
                 
+                print(f"[DEBUG] Final boolean features: {boolean_features}")
+                print(f"[DEBUG] Actual bool columns: {actual_bool_features}")
+                
                 # Remove boolean features from numeric features
                 numeric_features = [col for col in numeric_features if col not in boolean_features]
+                
+                print(f"[DEBUG] Final numeric features: {len(numeric_features)}")
+                print(f"[DEBUG] Final categorical features: {len(categorical_features)}")
+                print(f"[DEBUG] Final boolean features: {len(boolean_features)}")
                 
                 # Save feature bounds and types
                 for feature_name in self.X.columns:
@@ -2085,6 +2103,8 @@ class TrainingModule(QWidget):
                         feature_types[feature_name] = 'binary'
                     else:
                         feature_types[feature_name] = 'continuous'  # fallback
+                    
+                    print(f"[DEBUG] {feature_name}: type={feature_types[feature_name]}, bounds=({min_val:.2f}, {max_val:.2f})")
                 
                 # Prepare metadata in the format expected by multi_objective_optimization.py
                 metadata = {

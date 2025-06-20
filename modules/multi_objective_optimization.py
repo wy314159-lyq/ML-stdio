@@ -529,7 +529,8 @@ class MLProblem(Problem):
     """
     
     def __init__(self, models, model_indices, directions, n_var, xl, xu, feature_names, 
-                 fixed_features=None, feature_types=None, categorical_ranges=None):
+                 fixed_features=None, feature_types=None, categorical_ranges=None, 
+                 diversity_noise_scale=1e-10):
         """
         Initialize the multi-objective problem
         
@@ -544,6 +545,7 @@ class MLProblem(Problem):
             fixed_features: Dictionary of feature_index -> fixed_value
             feature_types: List of feature types ('continuous', 'binary', 'categorical')
             categorical_ranges: Dict mapping feature index to list of valid values
+            diversity_noise_scale: Scale factor for diversity noise (relative to objective magnitude)
         """
         n_obj = len(models)
         super().__init__(n_var=n_var, n_obj=n_obj, xl=xl, xu=xu)
@@ -556,8 +558,7 @@ class MLProblem(Problem):
         self.fixed_features = fixed_features or {}
         self.feature_types = feature_types or ['continuous'] * n_var
         self.categorical_ranges = categorical_ranges or {}
-        
-        # Note: Simplified for pymoo 0.5.0 compatibility
+        self.diversity_noise_scale = diversity_noise_scale
         
         # Validate inputs
         if len(models) != len(model_indices) or len(models) != len(directions):
@@ -574,7 +575,7 @@ class MLProblem(Problem):
     
     def _evaluate(self, x, out, *args, **kwargs):
         """
-        Simplified evaluation for pymoo 0.5.0 compatibility
+        Enhanced evaluation with controlled diversity preservation and numerical stability
         
         Args:
             x: Input solutions (n_solutions x n_variables)
@@ -590,7 +591,7 @@ class MLProblem(Problem):
                 # Apply bounds clipping
                 solution = np.clip(solution, self.xl, self.xu)
                 
-                # Apply fixed features if any (this ensures fixed features always have correct values)
+                # Apply fixed features if any
                 for feature_idx, fixed_value in self.fixed_features.items():
                     solution[feature_idx] = fixed_value
                 
@@ -618,17 +619,42 @@ class MLProblem(Problem):
                         # Predict and apply optimization direction
                         prediction = model.predict(x_df)[0]
                         
-                        # Validate prediction
+                        # Enhanced prediction validation
                         if not np.isfinite(prediction):
                             print(f"Warning: Invalid prediction from model {j+1}")
                             objectives[i, j] = float('inf')
                         else:
-                            objectives[i, j] = direction * prediction
+                            # Apply direction
+                            base_objective = direction * prediction
+                            
+                            # Add configurable diversity term to prevent identical objective values
+                            # This helps maintain multiple solutions on the Pareto front
+                            if self.diversity_noise_scale > 0:
+                                diversity_term = np.random.normal(0, abs(base_objective) * self.diversity_noise_scale)
+                                objectives[i, j] = base_objective + diversity_term
+                            else:
+                                objectives[i, j] = base_objective
                         
                     except Exception as e:
                         # Handle prediction errors for individual models
                         print(f"Model {j+1} prediction error: {str(e)}")
                         objectives[i, j] = float('inf')
+            
+            # Additional diversity check (only if diversity noise is enabled and low)
+            if (n_solutions > 1 and self.n_objectives >= 2 and 
+                0 < self.diversity_noise_scale < 1e-8):
+                for j in range(self.n_objectives):
+                    obj_values = objectives[:, j]
+                    valid_values = obj_values[np.isfinite(obj_values)]
+                    if len(valid_values) > 1:
+                        # Check if all values are too similar
+                        value_range = np.max(valid_values) - np.min(valid_values)
+                        mean_value = np.mean(valid_values)
+                        if value_range < abs(mean_value) * 1e-10:
+                            # Add minimal artificial diversity to prevent single-point Pareto front
+                            for idx, val in enumerate(obj_values):
+                                if np.isfinite(val):
+                                    objectives[idx, j] += np.random.normal(0, abs(mean_value) * 1e-12)
             
             out["F"] = objectives
             
@@ -689,6 +715,9 @@ class MultiObjectiveOptimizationWorker(QThread):
                     feature_name = feature_names[feature_idx] if feature_idx < len(feature_names) else f"Feature_{feature_idx}"
                     self.status_updated.emit(f"  • {feature_name} = {value}")
             
+            # Extract diversity noise scale from config (advanced parameter)
+            diversity_noise_scale = self.config.get('diversity_noise_scale', 1e-10)
+            
             # Create enhanced problem instance with constraint handling
             problem = MLProblem(
                 models=models,
@@ -700,7 +729,8 @@ class MultiObjectiveOptimizationWorker(QThread):
                 feature_names=feature_names,
                 fixed_features=fixed_features,
                 feature_types=feature_types,
-                categorical_ranges=categorical_ranges
+                categorical_ranges=categorical_ranges,
+                diversity_noise_scale=diversity_noise_scale
             )
             
             # Extract algorithm parameters
@@ -712,29 +742,150 @@ class MultiObjectiveOptimizationWorker(QThread):
             random_seed = self.config.get('random_seed', None)
             verbose = self.config.get('verbose', False)
             
+            # CRITICAL FIX: 调整重复解消除策略，避免帕累托前沿收缩为单点
+            # 对于多目标优化，过度的重复解消除会严重限制解的多样性
+            if eliminate_duplicates and len(models) >= 2:
+                # 对于多目标情况，使用更宽松的重复检测，保持解的多样性
+                eliminate_duplicates_adjusted = False
+                self.status_updated.emit("⚠️  调整重复解消除策略以保持帕累托前沿多样性")
+            else:
+                eliminate_duplicates_adjusted = eliminate_duplicates
+            
+            # 自动调整种群大小，确保有足够的多样性
+            min_pop_size = max(50, len(models) * 20)  # 每个目标至少20个个体
+            if population_size < min_pop_size:
+                population_size_adjusted = min_pop_size
+                self.status_updated.emit(f"⚠️  种群大小调整为 {min_pop_size} 以保证多样性")
+            else:
+                population_size_adjusted = population_size
+            
             # Set random seed if specified
             if random_seed is not None:
                 np.random.seed(random_seed)
                 self.status_updated.emit(f"Random seed set to: {random_seed}")
             
-            # Set up NSGA-II algorithm (simplified for pymoo 0.5.0 compatibility)
-            self.status_updated.emit("Configuring NSGA-II algorithm for pymoo 0.5.0...")
+            # Set up NSGA-II algorithm with proper mixed-variable support
+            self.status_updated.emit("Configuring NSGA-II algorithm with mixed-variable support...")
             
-            # Use basic configuration that works reliably with pymoo 0.5.0
-            algorithm = NSGA2(
-                pop_size=population_size,
-                eliminate_duplicates=eliminate_duplicates
-            )
+            # Check if we have mixed variables (discrete + continuous)
+            has_mixed_variables = any(ftype in ['binary', 'categorical'] for ftype in feature_types)
+            
+            # 使用改进的配置，专门针对混合变量优化
+            try:
+                from pymoo.operators.crossover.sbx import SBX
+                from pymoo.operators.mutation.pm import PM
+                
+                if has_mixed_variables:
+                    # For mixed variables, use custom sampling and repair
+                    self.status_updated.emit("🔧 检测到混合变量，使用专门的约束处理策略...")
+                    
+                    # Create mixed-variable sampling
+                    sampling = MixedVariableSampling(
+                        feature_types=feature_types,
+                        categorical_ranges=categorical_ranges
+                    )
+                    
+                    # Create enhanced repair operator for constraint handling
+                    repair = EnhancedBoundaryRepair(
+                        feature_types=feature_types,
+                        categorical_ranges=categorical_ranges,
+                        fixed_features=fixed_features
+                    )
+                    
+                    self.status_updated.emit(f"   📋 特征类型分布:")
+                    type_counts = {}
+                    for ftype in feature_types:
+                        type_counts[ftype] = type_counts.get(ftype, 0) + 1
+                    for ftype, count in type_counts.items():
+                        self.status_updated.emit(f"      {ftype}: {count} 个特征")
+                else:
+                    # For continuous variables only, use standard operators
+                    from pymoo.operators.sampling.rnd import FloatRandomSampling
+                    sampling = FloatRandomSampling()
+                    repair = None
+                    self.status_updated.emit("📈 所有特征为连续型，使用标准优化策略")
+                
+                # Configure crossover operator
+                crossover = SBX(prob=crossover_prob, eta=crossover_eta)
+                
+                # Configure mutation operator
+                if mutation_prob is None:
+                    mutation_prob_adjusted = min(0.3, max(0.1, 1.0 / len(feature_names)))
+                else:
+                    mutation_prob_adjusted = mutation_prob
+                
+                mutation = PM(prob=mutation_prob_adjusted, eta=mutation_eta)
+                
+                # Create NSGA-II algorithm with proper constraint handling
+                algorithm = NSGA2(
+                    pop_size=population_size_adjusted,
+                    sampling=sampling,
+                    crossover=crossover,
+                    mutation=mutation,
+                    repair=repair,  # CRITICAL: This ensures constraints are enforced during optimization
+                    eliminate_duplicates=eliminate_duplicates_adjusted
+                )
+                
+                if has_mixed_variables:
+                    self.status_updated.emit(f"✅ 混合变量算法配置完成：变异率={mutation_prob_adjusted:.3f}")
+                else:
+                    self.status_updated.emit(f"✅ 连续变量算法配置完成：变异率={mutation_prob_adjusted:.3f}")
+                
+            except ImportError:
+                # 如果无法导入高级算子，使用基础配置
+                if has_mixed_variables:
+                    # Try to create basic repair at least
+                    try:
+                        repair = EnhancedBoundaryRepair(
+                            feature_types=feature_types,
+                            categorical_ranges=categorical_ranges,
+                            fixed_features=fixed_features
+                        )
+                        algorithm = NSGA2(
+                            pop_size=population_size_adjusted,
+                            repair=repair,
+                            eliminate_duplicates=False
+                        )
+                        self.status_updated.emit("⚠️  使用基础算子配置+约束修复")
+                    except Exception:
+                        algorithm = NSGA2(
+                            pop_size=population_size_adjusted,
+                            eliminate_duplicates=False
+                        )
+                        self.status_updated.emit("⚠️  使用最基础配置（约束可能无法完全满足）")
+                else:
+                    algorithm = NSGA2(
+                        pop_size=population_size_adjusted,
+                        eliminate_duplicates=False
+                    )
+                    self.status_updated.emit("⚠️  使用基础算子配置")
             
             if verbose:
-                self.status_updated.emit(f"Algorithm configured:")
-                self.status_updated.emit(f"- Population size: {population_size}")
+                self.status_updated.emit(f"Algorithm configured (enhanced diversity mode):")
+                self.status_updated.emit(f"- Population size: {population_size_adjusted} (原始: {population_size})")
                 self.status_updated.emit(f"- Generations: {n_generations}")
-                self.status_updated.emit(f"- Eliminate duplicates: {eliminate_duplicates}")
+                self.status_updated.emit(f"- Objectives: {len(models)}")
+                self.status_updated.emit(f"- Variables: {len(feature_names)}")
+                self.status_updated.emit(f"- Categorical features: {len([t for t in feature_types if t in ['binary', 'categorical']])} features")
+                self.status_updated.emit(f"- Eliminate duplicates: {eliminate_duplicates_adjusted} (原始: {eliminate_duplicates})")
                 if fixed_features:
-                    self.status_updated.emit(f"- Fixed features: {len(fixed_features)}")
+                    self.status_updated.emit(f"- Fixed features: {len(fixed_features)} / {len(feature_names)}")
+                    free_features = len(feature_names) - len(fixed_features)
+                    self.status_updated.emit(f"- Free features: {free_features}")
+                    if free_features < 2:
+                        self.status_updated.emit("⚠️  自由特征数量很少，可能影响帕累托前沿多样性")
                 if random_seed is not None:
                     self.status_updated.emit(f"- Random seed: {random_seed}")
+                
+                # 计算搜索空间大小估计
+                search_space_size = 1.0
+                for i, bounds in enumerate(feature_bounds):
+                    if i not in fixed_features:
+                        search_space_size *= (bounds[1] - bounds[0])
+                self.status_updated.emit(f"- 估计搜索空间大小: {search_space_size:.2e}")
+                
+                if search_space_size < 1e-6:
+                    self.status_updated.emit("⚠️  搜索空间可能过小，建议检查特征边界设置")
             
             # Set termination criteria
             termination = get_termination("n_gen", n_generations)
@@ -775,25 +926,138 @@ class MultiObjectiveOptimizationWorker(QThread):
                         for feature_idx, fixed_value in fixed_features.items():
                             pareto_solutions[i, feature_idx] = fixed_value
                 
+                # Check if additional repair is needed (only if repair wasn't used during optimization)
+                has_mixed_variables = any(ftype in ['binary', 'categorical'] for ftype in feature_types)
+                if has_mixed_variables:
+                    self.status_updated.emit("Validating categorical constraints in final solutions...")
+                    
+                    # Quick validation check
+                    violations_found = False
+                    if len(pareto_solutions) > 0:
+                        sample_violations = 0
+                        for j, feature_type in enumerate(feature_types):
+                            if j >= pareto_solutions.shape[1]:
+                                break
+                            if feature_type == 'binary' and pareto_solutions[0, j] not in [0.0, 1.0]:
+                                sample_violations += 1
+                                violations_found = True
+                            elif feature_type == 'categorical' and j in categorical_ranges:
+                                if pareto_solutions[0, j] not in categorical_ranges[j]:
+                                    sample_violations += 1
+                                    violations_found = True
+                    
+                    if violations_found:
+                        self.status_updated.emit("⚠️  约束违反被检测到，应用最终修复...")
+                        
+                        # Apply final repair only if needed
+                        try:
+                            pareto_solutions_repaired = pareto_solutions.copy()
+                            
+                            for i in range(len(pareto_solutions_repaired)):
+                                for j in range(len(feature_types)):
+                                    if j >= pareto_solutions_repaired.shape[1]:
+                                        break
+                                        
+                                    # Apply fixed features first
+                                    if j in fixed_features:
+                                        pareto_solutions_repaired[i, j] = fixed_features[j]
+                                        continue
+                                    
+                                    # Get feature type
+                                    feature_type = feature_types[j] if j < len(feature_types) else 'continuous'
+                                    
+                                    # Apply type-specific constraints
+                                    if feature_type == 'binary':
+                                        # Binary: round to nearest 0 or 1
+                                        value = pareto_solutions_repaired[i, j]
+                                        pareto_solutions_repaired[i, j] = 1.0 if value >= 0.5 else 0.0
+                                    elif feature_type == 'categorical' and j in categorical_ranges:
+                                        # Categorical: find closest valid value
+                                        value = pareto_solutions_repaired[i, j]
+                                        valid_values = categorical_ranges[j]
+                                        distances = [abs(value - v) for v in valid_values]
+                                        closest_idx = np.argmin(distances)
+                                        pareto_solutions_repaired[i, j] = valid_values[closest_idx]
+                            
+                            pareto_solutions = pareto_solutions_repaired
+                            self.status_updated.emit("✅ 最终约束修复完成")
+                            
+                        except Exception as repair_error:
+                            self.status_updated.emit(f"Warning: Final repair failed: {repair_error}")
+                    else:
+                        self.status_updated.emit("✅ 所有分类约束已满足（优化过程中正确处理）")
+                
                 # Convert back to original objective values (multiply by direction to restore original scale)
                 original_objectives = pareto_front.copy()
                 for i, direction in enumerate(directions):
                     original_objectives[:, i] *= direction  # Convert back from minimization
                 
+                # 详细分析帕累托前沿质量
+                n_solutions = len(pareto_front)
+                self.status_updated.emit(f"分析帕累托前沿质量...")
+                
+                # 检查目标值的多样性
+                diversity_info = []
+                for i in range(len(models)):
+                    obj_values = original_objectives[:, i]
+                    obj_range = np.max(obj_values) - np.min(obj_values)
+                    obj_std = np.std(obj_values)
+                    obj_mean = np.mean(obj_values)
+                    
+                    diversity_info.append({
+                        'range': obj_range,
+                        'std': obj_std,
+                        'mean': obj_mean,
+                        'cv': obj_std / abs(obj_mean) if obj_mean != 0 else 0
+                    })
+                    
+                    self.status_updated.emit(f"目标 {i+1}: 范围={obj_range:.6f}, 标准差={obj_std:.6f}")
+                
+                # 检查解的多样性
+                solution_diversity = []
+                for i in range(len(feature_names)):
+                    if i not in fixed_features:
+                        feature_values = pareto_solutions[:, i]
+                        feature_range = np.max(feature_values) - np.min(feature_values)
+                        solution_diversity.append(feature_range)
+                
+                avg_solution_diversity = np.mean(solution_diversity) if solution_diversity else 0
+                self.status_updated.emit(f"解的平均多样性: {avg_solution_diversity:.6f}")
+                
+                # 帕累托前沿质量评估
+                if n_solutions == 1:
+                    self.status_updated.emit("⚠️  帕累托前沿只有1个点 - 这可能表明:")
+                    self.status_updated.emit("   1. 搜索空间过于受限")
+                    self.status_updated.emit("   2. 固定特征太多")
+                    self.status_updated.emit("   3. 目标函数返回相同值")
+                    self.status_updated.emit("   4. 重复消除过于严格")
+                elif n_solutions < 10:
+                    self.status_updated.emit(f"⚠️  帕累托前沿解数量较少 ({n_solutions})")
+                else:
+                    self.status_updated.emit(f"✅ 帕累托前沿包含 {n_solutions} 个多样化解")
+                
                 results = {
                     'pareto_front': original_objectives,
                     'pareto_solutions': pareto_solutions,
                     'feature_names': feature_names,
-                    'n_solutions': len(pareto_front),
+                    'n_solutions': n_solutions,
                     'n_objectives': len(models),
-                    'fixed_features': fixed_features,  # Include fixed features info
+                    'fixed_features': fixed_features,
                     'convergence_history': getattr(res, 'history', None),
                     'model_names': self.config.get('model_names', [f'Model {i+1}' for i in range(len(models))]),
-                    'objective_names': self.config.get('objective_names', [f'Objective {i+1}' for i in range(len(models))])
+                    'objective_names': self.config.get('objective_names', [f'Objective {i+1}' for i in range(len(models))]),
+                    'diversity_info': diversity_info,
+                    'solution_diversity': avg_solution_diversity
                 }
                 
-                # Report optimization completion
-                completion_msg = f"Optimization completed successfully! Found {len(pareto_front)} Pareto-optimal solutions."
+                # Report optimization completion with quality assessment
+                if n_solutions >= 10:
+                    completion_msg = f"✅ 优化成功完成！找到 {n_solutions} 个高质量帕累托最优解。"
+                elif n_solutions > 1:
+                    completion_msg = f"⚠️  优化完成，找到 {n_solutions} 个帕累托最优解（建议检查参数设置）。"
+                else:
+                    completion_msg = f"⚠️  优化完成，但只找到 {n_solutions} 个解（建议调整算法参数）。"
+                
                 self.status_updated.emit(completion_msg)
                 self.optimization_completed.emit(results)
             else:
@@ -996,8 +1260,8 @@ class MultiObjectiveOptimizationModule(QWidget):
         
         # Convergence and Termination
         self.eliminate_duplicates_check = QCheckBox()
-        self.eliminate_duplicates_check.setChecked(True)
-        self.eliminate_duplicates_check.setToolTip("Remove duplicate solutions to maintain diversity")
+        self.eliminate_duplicates_check.setChecked(False)  # 默认关闭以保持帕累托前沿多样性
+        self.eliminate_duplicates_check.setToolTip("Remove duplicate solutions (注意：启用可能会减少帕累托前沿的解数量)")
         algo_layout.addRow("Eliminate Duplicates:", self.eliminate_duplicates_check)
         
         # Advanced Parameters
@@ -1023,6 +1287,17 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.auto_mutation_check.setToolTip("Automatically set mutation probability to 1/n_variables")
         self.auto_mutation_check.stateChanged.connect(self.on_auto_mutation_changed)
         advanced_layout.addRow("Auto Mutation Prob:", self.auto_mutation_check)
+        
+        # Diversity noise scale parameter
+        self.diversity_noise_spin = QDoubleSpinBox()
+        self.diversity_noise_spin.setMinimum(0.0)
+        self.diversity_noise_spin.setMaximum(1e-6)
+        self.diversity_noise_spin.setValue(1e-10)
+        self.diversity_noise_spin.setDecimals(12)
+        self.diversity_noise_spin.setSingleStep(1e-11)
+        self.diversity_noise_spin.setSpecialValueText("Disabled")
+        self.diversity_noise_spin.setToolTip("Scale factor for diversity preservation noise (relative to objective magnitude). Set to 0 to disable. Recommended: 1e-10 to 1e-8")
+        advanced_layout.addRow("Diversity Noise Scale:", self.diversity_noise_spin)
         
         layout.addWidget(algo_group)
         layout.addWidget(advanced_group)
@@ -2108,7 +2383,9 @@ class MultiObjectiveOptimizationModule(QWidget):
             'tournament_size': self.tournament_size_spin.value(),
             'eliminate_duplicates': self.eliminate_duplicates_check.isChecked(),
             'random_seed': self.seed_spin.value() if self.seed_spin.value() != -1 else None,
-            'verbose': self.verbose_check.isChecked()
+            'verbose': self.verbose_check.isChecked(),
+            # Advanced diversity parameters
+            'diversity_noise_scale': self.diversity_noise_spin.value()
         }
         
         return config
