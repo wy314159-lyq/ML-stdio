@@ -1,5 +1,5 @@
 """
-Module for Multi-Objective Optimization using two separate, pre-trained models.
+Module for Single & Multi-Objective Optimization using one or more separate, pre-trained models.
 This module allows users to find a set of Pareto-optimal solutions
 that represent the trade-offs between two different objectives predicted by two models.
 """
@@ -685,8 +685,6 @@ class MultiObjectiveOptimizationWorker(QThread):
     def run(self):
         """Main optimization loop"""
         try:
-            self.status_updated.emit("Starting multi-objective optimization...")
-            
             # Extract configuration
             models = self.config['models']
             model_indices = self.config['model_indices']
@@ -696,6 +694,13 @@ class MultiObjectiveOptimizationWorker(QThread):
             population_size = self.config['population_size']
             n_generations = self.config['n_generations']
             feature_names = self.config['feature_names']
+            
+            # Determine optimization type based on number of models
+            is_single_objective = len(models) == 1
+            if is_single_objective:
+                self.status_updated.emit("Starting single-objective optimization...")
+            else:
+                self.status_updated.emit("Starting multi-objective optimization...")
             
             # Prepare bounds
             n_var = len(feature_names)
@@ -742,20 +747,30 @@ class MultiObjectiveOptimizationWorker(QThread):
             random_seed = self.config.get('random_seed', None)
             verbose = self.config.get('verbose', False)
             
-            # CRITICAL FIX: 调整重复解消除策略，避免帕累托前沿收缩为单点
-            # 对于多目标优化，过度的重复解消除会严重限制解的多样性
-            if eliminate_duplicates and len(models) >= 2:
-                # 对于多目标情况，使用更宽松的重复检测，保持解的多样性
-                eliminate_duplicates_adjusted = False
-                self.status_updated.emit("⚠️  调整重复解消除策略以保持帕累托前沿多样性")
-            else:
+            # Configure optimization strategy based on objective count
+            if is_single_objective:
+                # For single-objective optimization, use standard settings
                 eliminate_duplicates_adjusted = eliminate_duplicates
+                min_pop_size = max(30, len(feature_names) * 2)  # Smaller population for single objective
+                self.status_updated.emit("配置单目标优化策略...")
+            else:
+                # CRITICAL FIX: 调整重复解消除策略，避免帕累托前沿收缩为单点
+                # 对于多目标优化，过度的重复解消除会严重限制解的多样性
+                if eliminate_duplicates and len(models) >= 2:
+                    # 对于多目标情况，使用更宽松的重复检测，保持解的多样性
+                    eliminate_duplicates_adjusted = False
+                    self.status_updated.emit("⚠️  调整重复解消除策略以保持帕累托前沿多样性")
+                else:
+                    eliminate_duplicates_adjusted = eliminate_duplicates
+                
+                # 自动调整种群大小，确保有足够的多样性
+                min_pop_size = max(50, len(models) * 20)  # 每个目标至少20个个体
+                self.status_updated.emit("配置多目标优化策略...")
             
-            # 自动调整种群大小，确保有足够的多样性
-            min_pop_size = max(50, len(models) * 20)  # 每个目标至少20个个体
+            # Adjust population size
             if population_size < min_pop_size:
                 population_size_adjusted = min_pop_size
-                self.status_updated.emit(f"⚠️  种群大小调整为 {min_pop_size} 以保证多样性")
+                self.status_updated.emit(f"⚠️  种群大小调整为 {min_pop_size} 以保证收敛性")
             else:
                 population_size_adjusted = population_size
             
@@ -764,8 +779,11 @@ class MultiObjectiveOptimizationWorker(QThread):
                 np.random.seed(random_seed)
                 self.status_updated.emit(f"Random seed set to: {random_seed}")
             
-            # Set up NSGA-II algorithm with proper mixed-variable support
-            self.status_updated.emit("Configuring NSGA-II algorithm with mixed-variable support...")
+            # Set up algorithm with proper mixed-variable support
+            if is_single_objective:
+                self.status_updated.emit("Configuring GA algorithm for single-objective optimization...")
+            else:
+                self.status_updated.emit("Configuring NSGA-II algorithm for multi-objective optimization...")
             
             # Check if we have mixed variables (discrete + continuous)
             has_mixed_variables = any(ftype in ['binary', 'categorical'] for ftype in feature_types)
@@ -816,15 +834,28 @@ class MultiObjectiveOptimizationWorker(QThread):
                 
                 mutation = PM(prob=mutation_prob_adjusted, eta=mutation_eta)
                 
-                # Create NSGA-II algorithm with proper constraint handling
-                algorithm = NSGA2(
-                    pop_size=population_size_adjusted,
-                    sampling=sampling,
-                    crossover=crossover,
-                    mutation=mutation,
-                    repair=repair,  # CRITICAL: This ensures constraints are enforced during optimization
-                    eliminate_duplicates=eliminate_duplicates_adjusted
-                )
+                # Create algorithm based on objective count
+                if is_single_objective:
+                    # Use Genetic Algorithm for single objective
+                    from pymoo.algorithms.soo.nonconvex.ga import GA
+                    algorithm = GA(
+                        pop_size=population_size_adjusted,
+                        sampling=sampling,
+                        crossover=crossover,
+                        mutation=mutation,
+                        repair=repair,
+                        eliminate_duplicates=eliminate_duplicates_adjusted
+                    )
+                else:
+                    # Use NSGA-II for multi-objective
+                    algorithm = NSGA2(
+                        pop_size=population_size_adjusted,
+                        sampling=sampling,
+                        crossover=crossover,
+                        mutation=mutation,
+                        repair=repair,  # CRITICAL: This ensures constraints are enforced during optimization
+                        eliminate_duplicates=eliminate_duplicates_adjusted
+                    )
                 
                 if has_mixed_variables:
                     self.status_updated.emit(f"✅ 混合变量算法配置完成：变异率={mutation_prob_adjusted:.3f}")
@@ -841,23 +872,45 @@ class MultiObjectiveOptimizationWorker(QThread):
                             categorical_ranges=categorical_ranges,
                             fixed_features=fixed_features
                         )
-                        algorithm = NSGA2(
-                            pop_size=population_size_adjusted,
-                            repair=repair,
-                            eliminate_duplicates=False
-                        )
+                        if is_single_objective:
+                            from pymoo.algorithms.soo.nonconvex.ga import GA
+                            algorithm = GA(
+                                pop_size=population_size_adjusted,
+                                repair=repair,
+                                eliminate_duplicates=False
+                            )
+                        else:
+                            algorithm = NSGA2(
+                                pop_size=population_size_adjusted,
+                                repair=repair,
+                                eliminate_duplicates=False
+                            )
                         self.status_updated.emit("⚠️  使用基础算子配置+约束修复")
                     except Exception:
+                        if is_single_objective:
+                            from pymoo.algorithms.soo.nonconvex.ga import GA
+                            algorithm = GA(
+                                pop_size=population_size_adjusted,
+                                eliminate_duplicates=False
+                            )
+                        else:
+                            algorithm = NSGA2(
+                                pop_size=population_size_adjusted,
+                                eliminate_duplicates=False
+                            )
+                        self.status_updated.emit("⚠️  使用最基础配置（约束可能无法完全满足）")
+                else:
+                    if is_single_objective:
+                        from pymoo.algorithms.soo.nonconvex.ga import GA
+                        algorithm = GA(
+                            pop_size=population_size_adjusted,
+                            eliminate_duplicates=False
+                        )
+                    else:
                         algorithm = NSGA2(
                             pop_size=population_size_adjusted,
                             eliminate_duplicates=False
                         )
-                        self.status_updated.emit("⚠️  使用最基础配置（约束可能无法完全满足）")
-                else:
-                    algorithm = NSGA2(
-                        pop_size=population_size_adjusted,
-                        eliminate_duplicates=False
-                    )
                     self.status_updated.emit("⚠️  使用基础算子配置")
             
             if verbose:
@@ -911,9 +964,47 @@ class MultiObjectiveOptimizationWorker(QThread):
                 # Process results
                 self.status_updated.emit("Processing optimization results...")
                 
-                # Get final Pareto front from pymoo 0.5.0 result
-                pareto_front = res.F
-                pareto_solutions = res.X
+                # Get final results from pymoo 0.5.0 result (different structure for single vs multi-objective)
+                if is_single_objective:
+                    # For single-objective, res.F is 1D array, res.X is 2D array [pop_size, n_vars]
+                    # Get the best solution and entire population for diversity
+                    if hasattr(res, 'X') and res.X is not None:
+                        if res.X.ndim == 1:
+                            # Single best solution
+                            pareto_solutions = res.X.reshape(1, -1)  # Shape: [1, n_vars]
+                        else:
+                            # Population solutions - take top 10 or all if fewer
+                            n_solutions_to_keep = min(10, len(res.X))
+                            if hasattr(res, 'F') and res.F is not None:
+                                # Sort by objective value and take best solutions
+                                sorted_indices = np.argsort(res.F)[:n_solutions_to_keep]
+                                pareto_solutions = res.X[sorted_indices]
+                            else:
+                                pareto_solutions = res.X[:n_solutions_to_keep]
+                    else:
+                        raise ValueError("Single-objective optimization failed to find solutions")
+                    
+                    # Get corresponding objective values
+                    if hasattr(res, 'F') and res.F is not None:
+                        if res.F.ndim == 0:
+                            # Single objective value
+                            pareto_front = np.array([[res.F]])  # Shape: [1, 1]
+                        elif res.F.ndim == 1:
+                            if len(pareto_solutions) == 1:
+                                # Single best solution
+                                pareto_front = np.array([[res.F[0]]])  # Take best objective
+                            else:
+                                # Multiple solutions
+                                n_solutions = len(pareto_solutions)
+                                pareto_front = res.F[:n_solutions].reshape(-1, 1)  # Shape: [n_solutions, 1]
+                        else:
+                            pareto_front = res.F[:len(pareto_solutions)]
+                    else:
+                        raise ValueError("Single-objective optimization failed to get objective values")
+                else:
+                    # For multi-objective, standard Pareto front processing
+                    pareto_front = res.F
+                    pareto_solutions = res.X
                 
                 # Validate results
                 if pareto_front is None or len(pareto_front) == 0:
@@ -992,9 +1083,12 @@ class MultiObjectiveOptimizationWorker(QThread):
                 for i, direction in enumerate(directions):
                     original_objectives[:, i] *= direction  # Convert back from minimization
                 
-                # 详细分析帕累托前沿质量
+                # 详细分析优化结果质量
                 n_solutions = len(pareto_front)
-                self.status_updated.emit(f"分析帕累托前沿质量...")
+                if is_single_objective:
+                    self.status_updated.emit(f"分析单目标优化结果质量...")
+                else:
+                    self.status_updated.emit(f"分析帕累托前沿质量...")
                 
                 # 检查目标值的多样性
                 diversity_info = []
@@ -1011,7 +1105,10 @@ class MultiObjectiveOptimizationWorker(QThread):
                         'cv': obj_std / abs(obj_mean) if obj_mean != 0 else 0
                     })
                     
-                    self.status_updated.emit(f"目标 {i+1}: 范围={obj_range:.6f}, 标准差={obj_std:.6f}")
+                    if is_single_objective:
+                        self.status_updated.emit(f"目标值: 最优={np.min(obj_values):.6f}, 平均={obj_mean:.6f}, 标准差={obj_std:.6f}")
+                    else:
+                        self.status_updated.emit(f"目标 {i+1}: 范围={obj_range:.6f}, 标准差={obj_std:.6f}")
                 
                 # 检查解的多样性
                 solution_diversity = []
@@ -1024,17 +1121,24 @@ class MultiObjectiveOptimizationWorker(QThread):
                 avg_solution_diversity = np.mean(solution_diversity) if solution_diversity else 0
                 self.status_updated.emit(f"解的平均多样性: {avg_solution_diversity:.6f}")
                 
-                # 帕累托前沿质量评估
-                if n_solutions == 1:
-                    self.status_updated.emit("⚠️  帕累托前沿只有1个点 - 这可能表明:")
-                    self.status_updated.emit("   1. 搜索空间过于受限")
-                    self.status_updated.emit("   2. 固定特征太多")
-                    self.status_updated.emit("   3. 目标函数返回相同值")
-                    self.status_updated.emit("   4. 重复消除过于严格")
-                elif n_solutions < 10:
-                    self.status_updated.emit(f"⚠️  帕累托前沿解数量较少 ({n_solutions})")
+                # 优化结果质量评估
+                if is_single_objective:
+                    if n_solutions == 1:
+                        self.status_updated.emit("✅ 单目标优化找到最优解")
+                    else:
+                        self.status_updated.emit(f"✅ 单目标优化找到 {n_solutions} 个优质解")
                 else:
-                    self.status_updated.emit(f"✅ 帕累托前沿包含 {n_solutions} 个多样化解")
+                    # 多目标优化的质量评估
+                    if n_solutions == 1:
+                        self.status_updated.emit("⚠️  帕累托前沿只有1个点 - 这可能表明:")
+                        self.status_updated.emit("   1. 搜索空间过于受限")
+                        self.status_updated.emit("   2. 固定特征太多")
+                        self.status_updated.emit("   3. 目标函数返回相同值")
+                        self.status_updated.emit("   4. 重复消除过于严格")
+                    elif n_solutions < 10:
+                        self.status_updated.emit(f"⚠️  帕累托前沿解数量较少 ({n_solutions})")
+                    else:
+                        self.status_updated.emit(f"✅ 帕累托前沿包含 {n_solutions} 个多样化解")
                 
                 results = {
                     'pareto_front': original_objectives,
@@ -1047,16 +1151,23 @@ class MultiObjectiveOptimizationWorker(QThread):
                     'model_names': self.config.get('model_names', [f'Model {i+1}' for i in range(len(models))]),
                     'objective_names': self.config.get('objective_names', [f'Objective {i+1}' for i in range(len(models))]),
                     'diversity_info': diversity_info,
-                    'solution_diversity': avg_solution_diversity
+                    'solution_diversity': avg_solution_diversity,
+                    'is_single_objective': is_single_objective
                 }
                 
                 # Report optimization completion with quality assessment
-                if n_solutions >= 10:
-                    completion_msg = f"✅ 优化成功完成！找到 {n_solutions} 个高质量帕累托最优解。"
-                elif n_solutions > 1:
-                    completion_msg = f"⚠️  优化完成，找到 {n_solutions} 个帕累托最优解（建议检查参数设置）。"
+                if is_single_objective:
+                    if n_solutions == 1:
+                        completion_msg = f"✅ 单目标优化成功完成！找到最优解。"
+                    else:
+                        completion_msg = f"✅ 单目标优化成功完成！找到 {n_solutions} 个优质解。"
                 else:
-                    completion_msg = f"⚠️  优化完成，但只找到 {n_solutions} 个解（建议调整算法参数）。"
+                    if n_solutions >= 10:
+                        completion_msg = f"✅ 多目标优化成功完成！找到 {n_solutions} 个高质量帕累托最优解。"
+                    elif n_solutions > 1:
+                        completion_msg = f"⚠️  多目标优化完成，找到 {n_solutions} 个帕累托最优解（建议检查参数设置）。"
+                    else:
+                        completion_msg = f"⚠️  多目标优化完成，但只找到 {n_solutions} 个解（建议调整算法参数）。"
                 
                 self.status_updated.emit(completion_msg)
                 self.optimization_completed.emit(results)
@@ -1075,7 +1186,8 @@ class MultiObjectiveOptimizationWorker(QThread):
 
 class MultiObjectiveOptimizationModule(QWidget):
     """
-    UI for the Multi-Objective Optimization module.
+    UI for the Single & Multi-Objective Optimization module.
+    Supports both single-objective optimization (1 model) and multi-objective optimization (2+ models).
     """
     
     def __init__(self):
@@ -1093,6 +1205,9 @@ class MultiObjectiveOptimizationModule(QWidget):
         
         # Initialize UI
         self.init_ui()
+        
+        # Initialize algorithm settings display
+        self.update_algorithm_settings_display()
         
     def show_dependency_error(self):
         """Show error message for missing pymoo dependency"""
@@ -1146,8 +1261,7 @@ class MultiObjectiveOptimizationModule(QWidget):
         # Store model widgets for dynamic management
         self.model_widgets = []
         
-        # Add initial two model rows
-        self.add_model_row()
+        # Add initial model row (single model minimum)
         self.add_model_row()
         
         layout.addWidget(model_group)
@@ -1187,9 +1301,24 @@ class MultiObjectiveOptimizationModule(QWidget):
         
         layout.addWidget(bounds_group)
         
-        # Algorithm Settings Section
-        algo_group = QGroupBox("NSGA-II Algorithm Settings")
-        algo_layout = QFormLayout(algo_group)
+        # Algorithm Status Indicator
+        self.algo_status_label = QLabel("🎯 Current Algorithm: GA (Genetic Algorithm) - Single-Objective Mode")
+        self.algo_status_label.setStyleSheet("""
+            QLabel {
+                background-color: #e3f2fd;
+                border: 2px solid #2196f3;
+                border-radius: 5px;
+                padding: 8px;
+                font-weight: bold;
+                color: #1976d2;
+            }
+        """)
+        self.algo_status_label.setWordWrap(True)
+        layout.addWidget(self.algo_status_label)
+        
+        # Algorithm Settings Section (will be updated dynamically)
+        self.algo_group = QGroupBox("Genetic Algorithm Settings")
+        algo_layout = QFormLayout(self.algo_group)
         
         # Basic Parameters
         self.population_spin = QSpinBox()
@@ -1197,6 +1326,7 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.population_spin.setMaximum(500)
         self.population_spin.setValue(50)
         self.population_spin.setToolTip("Number of individuals in each generation (larger = more diverse but slower)")
+        self.population_spin.valueChanged.connect(lambda: self._mark_param_modified('population_size'))
         algo_layout.addRow("Population Size:", self.population_spin)
         
         self.generations_spin = QSpinBox()
@@ -1262,6 +1392,7 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.eliminate_duplicates_check = QCheckBox()
         self.eliminate_duplicates_check.setChecked(False)  # 默认关闭以保持帕累托前沿多样性
         self.eliminate_duplicates_check.setToolTip("Remove duplicate solutions (注意：启用可能会减少帕累托前沿的解数量)")
+        self.eliminate_duplicates_check.stateChanged.connect(lambda: self._mark_param_modified('eliminate_duplicates'))
         algo_layout.addRow("Eliminate Duplicates:", self.eliminate_duplicates_check)
         
         # Advanced Parameters
@@ -1299,7 +1430,7 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.diversity_noise_spin.setToolTip("Scale factor for diversity preservation noise (relative to objective magnitude). Set to 0 to disable. Recommended: 1e-10 to 1e-8")
         advanced_layout.addRow("Diversity Noise Scale:", self.diversity_noise_spin)
         
-        layout.addWidget(algo_group)
+        layout.addWidget(self.algo_group)
         layout.addWidget(advanced_group)
         
         # Control Buttons
@@ -1395,8 +1526,8 @@ class MultiObjectiveOptimizationModule(QWidget):
         
     def remove_model_row(self, index):
         """Remove a model row"""
-        if len(self.model_widgets) <= 2:
-            QMessageBox.warning(self, "Warning", "At least 2 models are required for multi-objective optimization.")
+        if len(self.model_widgets) <= 1:
+            QMessageBox.warning(self, "Warning", "At least 1 model is required for optimization.")
             return
         
         # Remove from layout and data structures
@@ -1417,14 +1548,132 @@ class MultiObjectiveOptimizationModule(QWidget):
         # Update remove button visibility
         self.update_remove_buttons()
         
-        # Update features if needed
+        # Update features and indices after model removal
         self.update_features_and_objectives()
+        
+        # Update algorithm settings display
+        self.update_algorithm_settings_display()
         
     def update_remove_buttons(self):
         """Update visibility of remove buttons"""
-        show_remove = len(self.model_widgets) > 2
+        show_remove = len(self.model_widgets) > 1  # Allow removal only if more than 1 model
         for widget in self.model_widgets:
             widget['remove_btn'].setVisible(show_remove)
+    
+    def update_algorithm_settings_display(self):
+        """Update algorithm settings display based on number of loaded models"""
+        loaded_models = [data for data in self.models_data if data is not None]
+        n_models = len(loaded_models)
+        
+        if n_models <= 1:
+            # Single-objective optimization with GA
+            self.algo_group.setTitle("🎯 GA (Genetic Algorithm) Settings")
+            self.algo_status_label.setText("🎯 Current Algorithm: GA (Genetic Algorithm) - Single-Objective Mode")
+            self.algo_status_label.setStyleSheet("""
+                QLabel {
+                    background-color: #e8f5e8;
+                    border: 2px solid #4caf50;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #2e7d32;
+                }
+            """)
+            
+            # Adjust default values for single-objective if they haven't been manually changed
+            if not hasattr(self, '_user_modified_params'):
+                self._user_modified_params = set()
+            
+            if 'population_size' not in self._user_modified_params:
+                current_pop = self.population_spin.value()
+                if current_pop > 100:  # Only reduce if it's currently high
+                    self.population_spin.setValue(50)  # Smaller population for single-objective
+            
+            if 'eliminate_duplicates' not in self._user_modified_params:
+                self.eliminate_duplicates_check.setChecked(True)  # Better for single-objective convergence
+            
+            # Update tooltips for single-objective context
+            self.population_spin.setToolTip(
+                "Population size for GA (typically 30-100 for single-objective, smaller than multi-objective)"
+            )
+            self.crossover_prob_spin.setToolTip(
+                "Probability of crossover in GA (0.7-0.95 recommended for single-objective)"
+            )
+            self.crossover_eta_spin.setToolTip(
+                "Crossover distribution index for SBX (10-20 typical for single-objective)"
+            )
+            self.mutation_prob_spin.setToolTip(
+                "Mutation probability in GA (typically 1/n_variables, auto-calculated if enabled)"
+            )
+            self.mutation_eta_spin.setToolTip(
+                "Mutation distribution index for polynomial mutation (15-25 typical for single-objective)"
+            )
+            self.eliminate_duplicates_check.setToolTip(
+                "Remove duplicate solutions (recommended for GA convergence)"
+            )
+            
+            # Update diversity noise tooltip for single-objective
+            self.diversity_noise_spin.setToolTip(
+                "Diversity noise for GA (less critical for single-objective, can be set to 0)"
+            )
+            
+        else:
+            # Multi-objective optimization with NSGA-II
+            self.algo_group.setTitle("🔄 NSGA-II (Multi-Objective) Algorithm Settings")
+            self.algo_status_label.setText(f"🔄 Current Algorithm: NSGA-II - {n_models}-Objective Optimization Mode")
+            self.algo_status_label.setStyleSheet("""
+                QLabel {
+                    background-color: #fff3e0;
+                    border: 2px solid #ff9800;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #e65100;
+                }
+            """)
+            
+            # Adjust default values for multi-objective if they haven't been manually changed
+            if not hasattr(self, '_user_modified_params'):
+                self._user_modified_params = set()
+            
+            if 'population_size' not in self._user_modified_params:
+                current_pop = self.population_spin.value()
+                if current_pop < 50:  # Increase if it's currently too small
+                    self.population_spin.setValue(max(50, n_models * 20))  # Larger population for multi-objective
+            
+            if 'eliminate_duplicates' not in self._user_modified_params:
+                self.eliminate_duplicates_check.setChecked(False)  # Better for Pareto front diversity
+            
+            # Update tooltips for multi-objective context
+            self.population_spin.setToolTip(
+                f"Population size for NSGA-II (typically {max(50, n_models * 20)}-200 for {n_models}-objective, needs larger population for better Pareto front)"
+            )
+            self.crossover_prob_spin.setToolTip(
+                "Probability of crossover in NSGA-II (0.8-0.95 recommended for multi-objective)"
+            )
+            self.crossover_eta_spin.setToolTip(
+                "Crossover distribution index for SBX (5-20 typical for multi-objective, lower = more exploration)"
+            )
+            self.mutation_prob_spin.setToolTip(
+                "Mutation probability in NSGA-II (typically 1/n_variables, critical for Pareto front diversity)"
+            )
+            self.mutation_eta_spin.setToolTip(
+                "Mutation distribution index for polynomial mutation (10-30 typical for multi-objective)"
+            )
+            self.eliminate_duplicates_check.setToolTip(
+                "Remove duplicate solutions (⚠️ WARNING: may severely reduce Pareto front diversity in multi-objective optimization)"
+            )
+            
+            # Update diversity noise tooltip for multi-objective
+            self.diversity_noise_spin.setToolTip(
+                "Diversity noise for NSGA-II (important for Pareto front diversity, recommended: 1e-10 to 1e-8)"
+            )
+    
+    def _mark_param_modified(self, param_name):
+        """Mark a parameter as manually modified by user"""
+        if not hasattr(self, '_user_modified_params'):
+            self._user_modified_params = set()
+        self._user_modified_params.add(param_name)
     
     def extract_original_ranges(self, pipeline, feature_names):
         """Extract original feature ranges from pipeline preprocessor using smart analyzer"""
@@ -1481,7 +1730,8 @@ class MultiObjectiveOptimizationModule(QWidget):
             if saved_feature_types and feature_name in saved_feature_types:
                 feature_type = saved_feature_types[feature_name]
             else:
-                # Default to continuous type for backward compatibility
+                # IMPORTANT FIX: Default to continuous type for ALL features unless explicitly saved otherwise
+                # This prevents incorrect binary/categorical classification based on feature names
                 feature_type = 'continuous'
             
             # Set bounds based on whether original ranges were detected
@@ -1516,34 +1766,11 @@ class MultiObjectiveOptimizationModule(QWidget):
             
             categories = None
             
-            # Only infer feature type from name patterns if not already saved
-            if not (saved_feature_types and feature_name in saved_feature_types):
-                feature_lower = feature_name.lower()
-                
-                # Check for common categorical patterns
-                if any(pattern in feature_lower for pattern in ['_encoded', '_onehot', '_dummy']):
-                    feature_type = 'categorical_encoded'
-                    bounds_original = (0, 1)  # Binary encoded features
-                    bounds_normalized = (0, 1)
-                    categories = [0, 1]
-                elif feature_lower.endswith('_category') or feature_lower.endswith('_class'):
-                    feature_type = 'categorical'
-                    # For categorical features, we'll need to determine categories later
-                    if not original_bounds:
-                        bounds_original = (0, 10)  # Default range, will be updated
-                        bounds_normalized = (0, 1)
-                elif any(pattern in feature_lower for pattern in ['_binary', '_flag', '_indicator']):
-                    feature_type = 'binary'
-                    bounds_original = (0, 1)
-                    bounds_normalized = (0, 1)
-                    categories = [0, 1]
-                elif feature_lower.startswith('is_') or feature_lower.startswith('has_'):
-                    feature_type = 'binary'
-                    bounds_original = (0, 1)
-                    bounds_normalized = (0, 1)
-                    categories = [0, 1]
+            # REMOVED: Feature type inference from name patterns - this was causing the bug
+            # All features default to 'continuous' unless explicitly saved as another type
+            # This prevents incorrect binary/categorical classification based on feature names
             
-            # Handle specific feature types based on saved information or inferred type
+            # Handle specific feature types based on saved information only
             if feature_type == 'binary':
                 if not original_bounds:
                     bounds_original = (0, 1)
@@ -1600,6 +1827,7 @@ class MultiObjectiveOptimizationModule(QWidget):
         else:
             self.log_text.append("⚠️  Could not extract original ranges from pipeline.")
             self.log_text.append("   Using smart defaults based on feature names.")
+            self.log_text.append("   🔧 All features treated as continuous unless explicitly saved otherwise.")
             self.log_text.append("   📊 Inferred feature information:")
             for name in feature_names:
                 bounds = feature_bounds.get(name, (0, 1))
@@ -1789,16 +2017,23 @@ class MultiObjectiveOptimizationModule(QWidget):
                 # Update combined features
                 self.update_features_and_objectives()
                 
+                # Update algorithm settings display
+                self.update_algorithm_settings_display()
+                
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load model {model_index + 1}: {str(e)}")
                 self.log_text.append(f"Error loading model {model_index + 1}: {str(e)}")
     
     def update_features_and_objectives(self):
         """Update UI after models are loaded"""
-        # Check if we have at least 2 models loaded
+        # Check if we have at least 1 model loaded
         loaded_models = [data for data in self.models_data if data is not None]
-        if len(loaded_models) < 2:
+        if len(loaded_models) < 1:
             self.start_btn.setEnabled(False)
+            # Clear features table if no models loaded
+            self.combined_features = []
+            self.model_indices = []
+            self.feature_table.setRowCount(0)
             return
         
         try:
@@ -1824,13 +2059,16 @@ class MultiObjectiveOptimizationModule(QWidget):
             # Update feature bounds table
             self.update_feature_bounds_table()
             
-            # Enable optimization if we have at least 2 models
-            self.start_btn.setEnabled(len(loaded_models) >= 2)
+            # Enable optimization if we have at least 1 model
+            self.start_btn.setEnabled(len(loaded_models) >= 1)
             
             self.log_text.append(f"Combined features: {len(self.combined_features)}")
             for i, (model_data, indices) in enumerate(zip(self.models_data, self.model_indices)):
                 if model_data is not None:
-                    self.log_text.append(f"Model {i+1} uses {len(indices)} features")
+                    if len(loaded_models) == 1:
+                        self.log_text.append(f"Single model uses {len(indices)} features")
+                    else:
+                        self.log_text.append(f"Model {i+1} uses {len(indices)} features")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to process features: {str(e)}")
@@ -2109,10 +2347,10 @@ class MultiObjectiveOptimizationModule(QWidget):
     
     def validate_optimization_inputs(self):
         """Validate all optimization inputs before starting"""
-        # Check if we have at least 2 models loaded
+        # Check if we have at least 1 model loaded
         loaded_models = [data for data in self.models_data if data is not None]
-        if len(loaded_models) < 2:
-            raise ValueError("At least 2 models are required for multi-objective optimization.")
+        if len(loaded_models) < 1:
+            raise ValueError("At least 1 model is required for optimization.")
         
         # Check if all loaded models are regression models
         for i, model_data in enumerate(self.models_data):
@@ -2211,11 +2449,11 @@ class MultiObjectiveOptimizationModule(QWidget):
             raise ValueError("At least one feature must be non-fixed for optimization")
     
     def start_optimization(self):
-        """Start the multi-objective optimization"""
-        # Check if we have at least 2 models loaded
+        """Start the optimization (single-objective or multi-objective)"""
+        # Check if we have at least 1 model loaded
         loaded_models = [data for data in self.models_data if data is not None]
-        if len(loaded_models) < 2:
-            QMessageBox.warning(self, "Warning", "Please load at least 2 models first.")
+        if len(loaded_models) < 1:
+            QMessageBox.warning(self, "Warning", "Please load at least 1 model first.")
             return
         
         try:
@@ -2433,13 +2671,39 @@ class MultiObjectiveOptimizationModule(QWidget):
             print(f"Progress update error: {e}")
     
     def update_pareto_plot(self, objectives):
-        """Update the Pareto front plot"""
+        """Update the optimization results plot (single-objective or Pareto front)"""
         try:
             self.pareto_figure.clear()
             
             n_objectives = objectives.shape[1]
             
-            if n_objectives == 2:
+            if n_objectives == 1:
+                # Single objective optimization - show histogram and evolution
+                ax = self.pareto_figure.add_subplot(111)
+                
+                # Get objective name
+                obj_name = "Objective"
+                for widget in self.model_widgets:
+                    if widget['model_data'] is not None:
+                        obj_name = widget['obj_name_label'].text()
+                        break
+                
+                # Plot histogram of objective values
+                ax.hist(objectives[:, 0], bins=min(20, len(objectives)), alpha=0.7, edgecolor='black')
+                ax.set_xlabel(f"{obj_name} Value")
+                ax.set_ylabel("Frequency")
+                ax.set_title(f"Single-Objective Optimization Results\n{obj_name}")
+                ax.grid(True, alpha=0.3)
+                
+                # Add statistics text
+                best_val = np.min(objectives[:, 0])
+                mean_val = np.mean(objectives[:, 0])
+                std_val = np.std(objectives[:, 0])
+                ax.axvline(best_val, color='red', linestyle='--', linewidth=2, label=f'Best: {best_val:.4f}')
+                ax.axvline(mean_val, color='green', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.4f}')
+                ax.legend()
+                
+            elif n_objectives == 2:
                 # Simple 2D plot
                 ax = self.pareto_figure.add_subplot(111)
                 ax.scatter(objectives[:, 0], objectives[:, 1], alpha=0.6, s=50)

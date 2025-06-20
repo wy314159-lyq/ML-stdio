@@ -152,9 +152,9 @@ class MatSciMLStudioWindow(QMainWindow):
         self.target_optimization = TargetOptimizationModule()
         self.tab_widget.addTab(self.target_optimization, "🎯 Target Optimization")
         
-        # Module 11: Multi-Objective Optimization
+        # Module 11: Single & Multi-Objective Optimization
         self.multi_objective_optimization = MultiObjectiveOptimizationModule()
-        self.tab_widget.addTab(self.multi_objective_optimization, "🔄 Multi-Objective Optimization")
+        self.tab_widget.addTab(self.multi_objective_optimization, "🔄 Optimization")
         
         # Connect modules
         self.connect_modules()

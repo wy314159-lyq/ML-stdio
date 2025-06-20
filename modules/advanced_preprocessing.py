@@ -6,6 +6,7 @@ Advanced Data Preprocessing Module for MatSci-ML Studio
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any, Union
+from datetime import datetime
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QLabel, QPushButton, QTextEdit, QComboBox,
                             QSpinBox, QDoubleSpinBox, QCheckBox, QTabWidget,
@@ -662,137 +663,916 @@ class OperationHistory:
         self.operations = []
         self.operation_id = 0
 
-class DataQualityAnalyzer:
-    """数据质量分析器"""
+class EnhancedDataQualityAnalyzer:
+    """
+    Enhanced Data Quality Analyzer with Multi-Dimensional Scoring System
     
-    def analyze(self, X: pd.DataFrame) -> Dict[str, Any]:
-        """分析数据质量"""
-        analysis = {
-            'basic_stats': self._basic_statistics(X),
-            'missing_data': self._missing_data_analysis(X),
-            'duplicates': self._duplicate_analysis(X),
-            'data_types': self._data_type_analysis(X),
-            'distribution': self._distribution_analysis(X),
-            'correlation': self._correlation_analysis(X),
-            'quality_score': 0
+    This analyzer evaluates data quality across five key dimensions:
+    1. Completeness - Missing data assessment
+    2. Uniqueness - Duplicate data detection
+    3. Validity - Data type consistency and range validation
+    4. Consistency - Feature correlation and distribution analysis
+    5. Relevance - Target variable relationship (ML-specific)
+    """
+    
+    def __init__(self):
+        # Default dimension weights (can be customized)
+        self.dimension_weights = {
+            'completeness': 0.30,    # 30% - Most critical for ML
+            'uniqueness': 0.20,      # 20% - Important for model accuracy
+            'validity': 0.20,        # 20% - Data type and format consistency
+            'consistency': 0.20,     # 20% - Distribution and correlation
+            'relevance': 0.10        # 10% - ML-specific relevance
         }
         
-        # 计算质量分数
-        analysis['quality_score'] = self._calculate_quality_score(analysis)
+        # Quality thresholds for different severity levels
+        self.thresholds = {
+            'excellent': 90,
+            'good': 75,
+            'fair': 60,
+            'poor': 40
+        }
+    
+    def analyze(self, X: pd.DataFrame, y: pd.Series = None) -> Dict[str, Any]:
+        """
+        Comprehensive data quality analysis across all dimensions
         
-        return analysis
+        Args:
+            X: Feature dataframe
+            y: Target variable (optional, for relevance analysis)
+            
+        Returns:
+            Dict containing detailed analysis results and scores
+        """
+        try:
+            analysis = {
+                'basic_stats': self._basic_statistics(X),
+                'completeness': self._completeness_analysis(X),
+                'uniqueness': self._uniqueness_analysis(X),
+                'validity': self._validity_analysis(X),
+                'consistency': self._consistency_analysis(X),
+                'relevance': self._relevance_analysis(X, y) if y is not None else None,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            # Calculate dimension scores
+            dimension_scores = self._calculate_dimension_scores(analysis)
+            analysis['dimension_scores'] = dimension_scores
+            
+            # Calculate overall quality score
+            overall_score = self._calculate_overall_score(dimension_scores)
+            analysis['overall_score'] = overall_score
+            analysis['quality_grade'] = self._get_quality_grade(overall_score)
+            
+            # Generate actionable recommendations
+            analysis['recommendations'] = self._generate_recommendations(analysis)
+            
+            return analysis
+            
+        except Exception as e:
+            return {
+                'error': f"Analysis failed: {str(e)}",
+                'overall_score': 0,
+                'quality_grade': 'Unknown'
+            }
     
     def _basic_statistics(self, X: pd.DataFrame) -> Dict[str, Any]:
-        """基础统计信息"""
+        """Calculate basic dataset statistics"""
         return {
-            'n_rows': len(X),
-            'n_columns': len(X.columns),
-            'memory_usage_mb': X.memory_usage(deep=True).sum() / (1024**2),
+            'total_rows': len(X),
+            'total_columns': len(X.columns),
+            'total_cells': X.shape[0] * X.shape[1],
             'numeric_columns': len(X.select_dtypes(include=[np.number]).columns),
-            'categorical_columns': len(X.select_dtypes(exclude=[np.number]).columns)
+            'categorical_columns': len(X.select_dtypes(exclude=[np.number]).columns),
+            'memory_usage_mb': X.memory_usage(deep=True).sum() / 1024 / 1024
         }
     
-    def _missing_data_analysis(self, X: pd.DataFrame) -> Dict[str, Any]:
-        """缺失数据分析"""
+    def _completeness_analysis(self, X: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze data completeness (missing values)"""
         missing_counts = X.isnull().sum()
+        total_cells = len(X) * len(X.columns)
+        total_missing = missing_counts.sum()
+        
+        # Calculate completeness metrics
+        cell_completeness = 1 - (total_missing / total_cells)
+        row_completeness = (X.isnull().sum(axis=1) == 0).sum() / len(X)
+        column_completeness = (missing_counts == 0).sum() / len(X.columns)
+        
+        # Identify problematic columns
         missing_percentages = (missing_counts / len(X)) * 100
+        high_missing_cols = missing_percentages[missing_percentages > 50].to_dict()
+        moderate_missing_cols = missing_percentages[(missing_percentages > 10) & (missing_percentages <= 50)].to_dict()
         
         return {
-            'total_missing': missing_counts.sum(),
-            'columns_with_missing': (missing_counts > 0).sum(),
-            'missing_by_column': {
-                col: {'count': int(count), 'percentage': float(pct)}
-                for col, count, pct in zip(missing_counts.index, missing_counts.values, missing_percentages.values)
-                if count > 0
-            },
-            'worst_column': missing_percentages.idxmax() if missing_percentages.max() > 0 else None,
-            'worst_percentage': float(missing_percentages.max())
+            'total_missing_values': int(total_missing),
+            'missing_percentage': (total_missing / total_cells) * 100,
+            'cell_completeness': cell_completeness * 100,
+            'row_completeness': row_completeness * 100,
+            'column_completeness': column_completeness * 100,
+            'columns_with_missing': len(missing_counts[missing_counts > 0]),
+            'high_missing_columns': high_missing_cols,
+            'moderate_missing_columns': moderate_missing_cols,
+            'missing_by_column': missing_counts.to_dict()
         }
     
-    def _duplicate_analysis(self, X: pd.DataFrame) -> Dict[str, Any]:
-        """重复数据分析"""
-        duplicates = X.duplicated()
+    def _uniqueness_analysis(self, X: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze data uniqueness (duplicates)"""
+        duplicate_rows = X.duplicated()
+        total_duplicates = duplicate_rows.sum()
+        duplicate_percentage = (total_duplicates / len(X)) * 100
+        
+        # Analyze column-level uniqueness
+        column_uniqueness = {}
+        for col in X.columns:
+            unique_count = X[col].nunique()
+            total_count = X[col].count()  # Exclude NaN
+            if total_count > 0:
+                uniqueness_ratio = unique_count / total_count
+                column_uniqueness[col] = {
+                    'unique_values': unique_count,
+                    'total_non_null': total_count,
+                    'uniqueness_ratio': uniqueness_ratio
+                }
         
         return {
-            'total_duplicates': int(duplicates.sum()),
-            'percentage': float((duplicates.sum() / len(X)) * 100),
-            'unique_rows': int(len(X) - duplicates.sum())
+            'duplicate_rows': int(total_duplicates),
+            'duplicate_percentage': duplicate_percentage,
+            'row_uniqueness': 100 - duplicate_percentage,
+            'column_uniqueness': column_uniqueness,
+            'completely_duplicate_columns': self._find_duplicate_columns(X)
         }
     
-    def _data_type_analysis(self, X: pd.DataFrame) -> Dict[str, Any]:
-        """数据类型分析"""
-        type_counts = X.dtypes.value_counts()
+    def _validity_analysis(self, X: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze data validity (type consistency, format issues)"""
+        validity_issues = {}
+        
+        # Check for mixed data types in columns
+        mixed_type_columns = []
+        for col in X.columns:
+            if X[col].dtype == 'object':  # String columns
+                # Check if column contains mixed numeric/string data
+                non_null_values = X[col].dropna()
+                if len(non_null_values) > 0:
+                    try:
+                        # Try to convert to numeric
+                        pd.to_numeric(non_null_values, errors='raise')
+                        # If successful, this might be a numeric column stored as string
+                        mixed_type_columns.append({
+                            'column': col,
+                            'issue': 'numeric_data_as_string',
+                            'sample_values': non_null_values.head(3).tolist()
+                        })
+                    except:
+                        # Check for mixed types within string column
+                        numeric_count = 0
+                        for val in non_null_values.head(100):  # Sample first 100
+                            try:
+                                float(val)
+                                numeric_count += 1
+                            except:
+                                pass
+                        
+                        if 0 < numeric_count < len(non_null_values.head(100)):
+                            mixed_type_columns.append({
+                                'column': col,
+                                'issue': 'mixed_numeric_string',
+                                'numeric_ratio': numeric_count / len(non_null_values.head(100))
+                            })
+        
+        # Check for high cardinality categorical columns
+        high_cardinality_cols = []
+        for col in X.select_dtypes(exclude=[np.number]).columns:
+            unique_count = X[col].nunique()
+            total_count = X[col].count()
+            if total_count > 0:
+                cardinality_ratio = unique_count / total_count
+                if cardinality_ratio > 0.8 and unique_count > 50:  # High cardinality threshold
+                    high_cardinality_cols.append({
+                        'column': col,
+                        'unique_values': unique_count,
+                        'cardinality_ratio': cardinality_ratio
+                    })
+        
+        # Calculate overall validity score
+        total_columns = len(X.columns)
+        problematic_columns = len(mixed_type_columns) + len(high_cardinality_cols)
+        validity_score = max(0, 100 - (problematic_columns / total_columns * 100))
         
         return {
-            'type_distribution': {str(dtype): int(count) for dtype, count in type_counts.items()},
-            'consistent_types': True,  # 可以添加更复杂的类型一致性检查
-            'recommendations': []
+            'validity_score': validity_score,
+            'mixed_type_columns': mixed_type_columns,
+            'high_cardinality_columns': high_cardinality_cols,
+            'total_validity_issues': problematic_columns
         }
     
-    def _distribution_analysis(self, X: pd.DataFrame) -> Dict[str, Any]:
-        """分布分析"""
+    def _consistency_analysis(self, X: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze data consistency (correlations, distributions) - Enhanced with advanced outlier detection"""
         numeric_cols = X.select_dtypes(include=[np.number]).columns
-        skewness = {}
-        kurtosis = {}
         
-        for col in numeric_cols:
-            if not X[col].isnull().all():
-                skewness[col] = float(X[col].skew())
-                kurtosis[col] = float(X[col].kurtosis())
-        
-        return {
-            'skewness': skewness,
-            'kurtosis': kurtosis,
-            'highly_skewed_columns': [col for col, skew in skewness.items() if abs(skew) > 2]
+        consistency_metrics = {
+            'high_correlation_pairs': [],
+            'distribution_issues': {},
+            'outlier_columns': [],
+            'advanced_outlier_analysis': {}
         }
-    
-    def _correlation_analysis(self, X: pd.DataFrame) -> Dict[str, Any]:
-        """相关性分析"""
-        numeric_cols = X.select_dtypes(include=[np.number]).columns
         
         if len(numeric_cols) > 1:
+            # Correlation analysis
             corr_matrix = X[numeric_cols].corr()
+            high_corr_threshold = 0.9
             
-            # 找出高相关性特征对
-            high_corr_pairs = []
             for i in range(len(corr_matrix.columns)):
                 for j in range(i+1, len(corr_matrix.columns)):
-                    corr_val = abs(corr_matrix.iloc[i, j])
-                    if corr_val > 0.9:
-                        high_corr_pairs.append({
-                            'feature1': corr_matrix.columns[i],
-                            'feature2': corr_matrix.columns[j],
-                            'correlation': float(corr_val)
+                    corr_value = abs(corr_matrix.iloc[i, j])
+                    if corr_value > high_corr_threshold:
+                        consistency_metrics['high_correlation_pairs'].append({
+                            'column1': corr_matrix.columns[i],
+                            'column2': corr_matrix.columns[j],
+                            'correlation': corr_value
                         })
             
-            return {
-                'max_correlation': float(corr_matrix.abs().max().max()),
-                'high_correlation_pairs': high_corr_pairs,
-                'correlation_matrix_shape': corr_matrix.shape
-            }
+            # Distribution analysis (skewness and kurtosis)
+            for col in numeric_cols:
+                if X[col].count() > 10:  # Need sufficient data
+                    try:
+                        skewness = X[col].skew()
+                        kurtosis = X[col].kurtosis()
+                        
+                        issues = []
+                        if abs(skewness) > 2:
+                            issues.append(f"high_skewness_{skewness:.2f}")
+                        if abs(kurtosis) > 3:
+                            issues.append(f"high_kurtosis_{kurtosis:.2f}")
+                        
+                        if issues:
+                            consistency_metrics['distribution_issues'][col] = {
+                                'skewness': skewness,
+                                'kurtosis': kurtosis,
+                                'issues': issues
+                            }
+                    except:
+                        pass
+            
+            # Advanced outlier detection using Isolation Forest (leveraging existing OutlierDetector)
+            try:
+                outlier_detector = OutlierDetector()
+                
+                # Use Isolation Forest for more sophisticated outlier detection
+                X_numeric_filled = X[numeric_cols].fillna(X[numeric_cols].median())
+                if len(X_numeric_filled) > 10:  # Minimum samples for Isolation Forest
+                    outliers_iso = outlier_detector.detect_outliers(
+                        X_numeric_filled, 
+                        method='Isolation Forest', 
+                        contamination=0.05  # Conservative 5% contamination rate
+                    )
+                    
+                    # Analyze outlier patterns for each column
+                    for col in numeric_cols:
+                        if col in outliers_iso.columns:
+                            outlier_count = outliers_iso[col].sum()
+                            outlier_percentage = (outlier_count / len(X_numeric_filled)) * 100
+                            
+                            if outlier_percentage > 3:  # More than 3% outliers considered significant
+                                consistency_metrics['outlier_columns'].append({
+                                    'column': col,
+                                    'outlier_count': int(outlier_count),
+                                    'outlier_percentage': outlier_percentage,
+                                    'detection_method': 'Isolation Forest'
+                                })
+                    
+                    # Overall outlier analysis summary
+                    total_outlier_cells = outliers_iso.sum().sum()
+                    total_cells = len(X_numeric_filled) * len(numeric_cols)
+                    overall_outlier_rate = (total_outlier_cells / total_cells) * 100
+                    
+                    consistency_metrics['advanced_outlier_analysis'] = {
+                        'total_outlier_cells': int(total_outlier_cells),
+                        'overall_outlier_rate': overall_outlier_rate,
+                        'detection_algorithm': 'Isolation Forest',
+                        'contamination_threshold': 0.05
+                    }
+                    
+            except Exception as e:
+                # Fallback to simple IQR method if advanced method fails
+                print(f"Advanced outlier detection failed, using fallback: {e}")
+                for col in numeric_cols:
+                    if X[col].count() > 10:
+                        try:
+                            Q1 = X[col].quantile(0.25)
+                            Q3 = X[col].quantile(0.75)
+                            IQR = Q3 - Q1
+                            lower_bound = Q1 - 1.5 * IQR
+                            upper_bound = Q3 + 1.5 * IQR
+                            
+                            outliers = X[(X[col] < lower_bound) | (X[col] > upper_bound)][col]
+                            outlier_percentage = len(outliers) / X[col].count() * 100
+                            
+                            if outlier_percentage > 5:  # More than 5% outliers
+                                consistency_metrics['outlier_columns'].append({
+                                    'column': col,
+                                    'outlier_count': len(outliers),
+                                    'outlier_percentage': outlier_percentage,
+                                    'detection_method': 'IQR (fallback)'
+                                })
+                        except:
+                            pass
         
-        return {'message': 'Not enough numeric columns for correlation analysis'}
+        # Calculate enhanced consistency score
+        total_issues = (len(consistency_metrics['high_correlation_pairs']) + 
+                       len(consistency_metrics['distribution_issues']) + 
+                       len(consistency_metrics['outlier_columns']))
+        
+        # Penalize based on advanced outlier analysis if available
+        outlier_penalty = 0
+        if consistency_metrics['advanced_outlier_analysis']:
+            outlier_rate = consistency_metrics['advanced_outlier_analysis']['overall_outlier_rate']
+            outlier_penalty = min(outlier_rate * 2, 30)  # Cap penalty at 30 points
+        
+        max_possible_issues = len(numeric_cols) * 2  # Rough estimate
+        base_score = max(0, 100 - (total_issues / max(max_possible_issues, 1) * 100))
+        consistency_score = max(0, base_score - outlier_penalty)
+        
+        consistency_metrics['consistency_score'] = consistency_score
+        consistency_metrics['total_consistency_issues'] = total_issues
+        
+        return consistency_metrics
     
-    def _calculate_quality_score(self, analysis: Dict[str, Any]) -> float:
-        """计算数据质量分数"""
-        score = 100.0
+    def _relevance_analysis(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
+        """Analyze data relevance for ML tasks - Enhanced with mutual information"""
+        if y is None:
+            return {'relevance_score': 50, 'note': 'No target variable provided'}
         
-        # 缺失数据扣分
-        missing_info = analysis['missing_data']
-        if missing_info['total_missing'] > 0:
-            missing_penalty = min(30, (missing_info['total_missing'] / analysis['basic_stats']['n_rows']) * 100)
-            score -= missing_penalty
+        relevance_metrics = {
+            'target_variability': 0,
+            'feature_target_correlations': {},
+            'feature_target_mutual_info': {},
+            'constant_features': [],
+            'low_variance_features': [],
+            'correlation_vs_mutual_info': {}
+        }
         
-        # 重复数据扣分
-        duplicate_penalty = min(20, analysis['duplicates']['percentage'])
-        score -= duplicate_penalty
+        # Target variable analysis
+        if pd.api.types.is_numeric_dtype(y):
+            # Regression task
+            target_variance = y.var()
+            target_range = y.max() - y.min()
+            relevance_metrics['target_variability'] = target_variance
+            relevance_metrics['target_range'] = target_range
+            relevance_metrics['task_type'] = 'regression'
+            
+            # Feature-target correlations for numeric features
+            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            
+            # Enhanced correlation analysis with mutual information
+            try:
+                from sklearn.feature_selection import mutual_info_regression
+                
+                # Prepare data for mutual information calculation
+                X_numeric_filled = X[numeric_cols].fillna(X[numeric_cols].median())
+                y_filled = y.fillna(y.median())
+                
+                if len(X_numeric_filled.columns) > 0 and len(X_numeric_filled) > 10:
+                    # Calculate mutual information
+                    mi_scores = mutual_info_regression(X_numeric_filled, y_filled, random_state=42)
+                    
+                    for i, col in enumerate(numeric_cols):
+                        if X[col].count() > 10:
+                            try:
+                                # Pearson correlation
+                                correlation = X[col].corr(y)
+                                if not pd.isna(correlation):
+                                    relevance_metrics['feature_target_correlations'][col] = abs(correlation)
+                                
+                                # Mutual information
+                                mi_score = mi_scores[i]
+                                relevance_metrics['feature_target_mutual_info'][col] = mi_score
+                                
+                                # Compare correlation vs mutual information
+                                if not pd.isna(correlation) and mi_score > 0:
+                                    relevance_metrics['correlation_vs_mutual_info'][col] = {
+                                        'pearson_correlation': abs(correlation),
+                                        'mutual_information': mi_score,
+                                        'mi_to_corr_ratio': mi_score / max(abs(correlation), 0.001),
+                                        'nonlinearity_indicator': 'High' if mi_score > abs(correlation) * 2 else 'Low'
+                                    }
+                            except Exception as e:
+                                print(f"Error calculating relevance for {col}: {e}")
+                                
+            except ImportError:
+                print("sklearn.feature_selection not available, using correlation only")
+                # Fallback to correlation only
+                for col in numeric_cols:
+                    if X[col].count() > 10:
+                        try:
+                            correlation = X[col].corr(y)
+                            if not pd.isna(correlation):
+                                relevance_metrics['feature_target_correlations'][col] = abs(correlation)
+                        except:
+                            pass
+                            
+        else:
+            # Classification task
+            class_counts = y.value_counts()
+            class_balance = min(class_counts) / max(class_counts) if len(class_counts) > 1 else 1
+            relevance_metrics['class_balance'] = class_balance
+            relevance_metrics['num_classes'] = len(class_counts)
+            relevance_metrics['task_type'] = 'classification'
+            
+            # For classification, use mutual_info_classif
+            try:
+                from sklearn.feature_selection import mutual_info_classif
+                
+                numeric_cols = X.select_dtypes(include=[np.number]).columns
+                X_numeric_filled = X[numeric_cols].fillna(X[numeric_cols].median())
+                
+                if len(X_numeric_filled.columns) > 0 and len(X_numeric_filled) > 10:
+                    mi_scores = mutual_info_classif(X_numeric_filled, y, random_state=42)
+                    
+                    for i, col in enumerate(numeric_cols):
+                        mi_score = mi_scores[i]
+                        relevance_metrics['feature_target_mutual_info'][col] = mi_score
+                        
+            except ImportError:
+                print("sklearn.feature_selection not available for classification")
         
-        # 高相关性扣分
-        if 'high_correlation_pairs' in analysis['correlation']:
-            corr_penalty = min(15, len(analysis['correlation']['high_correlation_pairs']) * 5)
-            score -= corr_penalty
+        # Identify constant and low-variance features
+        for col in X.select_dtypes(include=[np.number]).columns:
+            if X[col].count() > 0:
+                if X[col].nunique() == 1:
+                    relevance_metrics['constant_features'].append(col)
+                elif X[col].var() < 1e-6:  # Very low variance
+                    relevance_metrics['low_variance_features'].append(col)
         
-        return max(0, score)
+        # Calculate enhanced relevance score
+        relevance_score = 100
+        
+        # Penalize constant features
+        if relevance_metrics['constant_features']:
+            relevance_score -= len(relevance_metrics['constant_features']) * 10
+        
+        # Penalize low variance features
+        if relevance_metrics['low_variance_features']:
+            relevance_score -= len(relevance_metrics['low_variance_features']) * 5
+        
+        # Bonus for good feature-target relationships
+        if relevance_metrics['feature_target_correlations']:
+            avg_correlation = np.mean(list(relevance_metrics['feature_target_correlations'].values()))
+            relevance_score += avg_correlation * 20
+        
+        # Additional bonus for mutual information (captures nonlinear relationships)
+        if relevance_metrics['feature_target_mutual_info']:
+            # Normalize MI scores and add bonus
+            mi_values = list(relevance_metrics['feature_target_mutual_info'].values())
+            if mi_values:
+                avg_mi = np.mean(mi_values)
+                max_mi = max(mi_values)
+                # Bonus based on both average and maximum MI
+                mi_bonus = (avg_mi * 10) + (max_mi * 5)
+                relevance_score += min(mi_bonus, 25)  # Cap bonus at 25 points
+        
+        # Bonus for detecting nonlinear relationships
+        nonlinear_features = 0
+        if relevance_metrics['correlation_vs_mutual_info']:
+            for col, metrics in relevance_metrics['correlation_vs_mutual_info'].items():
+                if metrics['nonlinearity_indicator'] == 'High':
+                    nonlinear_features += 1
+            
+            if nonlinear_features > 0:
+                relevance_score += min(nonlinear_features * 3, 15)  # Bonus for nonlinear relationships
+        
+        relevance_metrics['relevance_score'] = max(0, min(100, relevance_score))
+        relevance_metrics['nonlinear_features_detected'] = nonlinear_features
+        
+        return relevance_metrics
+    
+    def _find_duplicate_columns(self, X: pd.DataFrame) -> List[List[str]]:
+        """Find columns that are completely identical"""
+        duplicate_groups = []
+        processed_cols = set()
+        
+        for col1 in X.columns:
+            if col1 in processed_cols:
+                continue
+                
+            duplicates = [col1]
+            for col2 in X.columns:
+                if col2 != col1 and col2 not in processed_cols:
+                    try:
+                        if X[col1].equals(X[col2]):
+                            duplicates.append(col2)
+                    except:
+                        pass
+            
+            if len(duplicates) > 1:
+                duplicate_groups.append(duplicates)
+                processed_cols.update(duplicates)
+            else:
+                processed_cols.add(col1)
+        
+        return duplicate_groups
+    
+    def _calculate_dimension_scores(self, analysis: Dict[str, Any]) -> Dict[str, float]:
+        """Calculate scores for each quality dimension"""
+        scores = {}
+        
+        # Completeness Score
+        completeness_data = analysis['completeness']
+        scores['completeness'] = completeness_data['cell_completeness']
+        
+        # Uniqueness Score
+        uniqueness_data = analysis['uniqueness']
+        scores['uniqueness'] = uniqueness_data['row_uniqueness']
+        
+        # Validity Score
+        validity_data = analysis['validity']
+        scores['validity'] = validity_data['validity_score']
+        
+        # Consistency Score
+        consistency_data = analysis['consistency']
+        scores['consistency'] = consistency_data['consistency_score']
+        
+        # Relevance Score
+        if analysis['relevance']:
+            scores['relevance'] = analysis['relevance']['relevance_score']
+        else:
+            scores['relevance'] = 50  # Neutral score when no target available
+        
+        return scores
+    
+    def _calculate_overall_score(self, dimension_scores: Dict[str, float]) -> float:
+        """Calculate weighted overall quality score"""
+        total_score = 0
+        total_weight = 0
+        
+        for dimension, score in dimension_scores.items():
+            weight = self.dimension_weights.get(dimension, 0)
+            total_score += score * weight
+            total_weight += weight
+        
+        return total_score / total_weight if total_weight > 0 else 0
+    
+    def _get_quality_grade(self, score: float) -> str:
+        """Convert numeric score to quality grade"""
+        if score >= self.thresholds['excellent']:
+            return 'Excellent'
+        elif score >= self.thresholds['good']:
+            return 'Good'
+        elif score >= self.thresholds['fair']:
+            return 'Fair'
+        elif score >= self.thresholds['poor']:
+            return 'Poor'
+        else:
+            return 'Critical'
+    
+    def _generate_recommendations(self, analysis: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Generate actionable recommendations based on analysis"""
+        recommendations = []
+        
+        # Completeness recommendations
+        completeness = analysis['completeness']
+        if completeness['missing_percentage'] > 20:
+            recommendations.append({
+                'priority': 'High',
+                'dimension': 'Completeness',
+                'issue': f"High missing data rate ({completeness['missing_percentage']:.1f}%)",
+                'recommendation': 'Consider advanced imputation methods or feature selection to handle missing values'
+            })
+        
+        if completeness['high_missing_columns']:
+            recommendations.append({
+                'priority': 'Medium',
+                'dimension': 'Completeness',
+                'issue': f"Columns with >50% missing data: {list(completeness['high_missing_columns'].keys())}",
+                'recommendation': 'Consider removing these columns or using specialized imputation techniques'
+            })
+        
+        # Uniqueness recommendations
+        uniqueness = analysis['uniqueness']
+        if uniqueness['duplicate_percentage'] > 10:
+            recommendations.append({
+                'priority': 'High',
+                'dimension': 'Uniqueness',
+                'issue': f"High duplicate rate ({uniqueness['duplicate_percentage']:.1f}%)",
+                'recommendation': 'Remove duplicate rows to improve model performance'
+            })
+        
+        # Validity recommendations
+        validity = analysis['validity']
+        if validity['mixed_type_columns']:
+            for issue in validity['mixed_type_columns']:
+                recommendations.append({
+                    'priority': 'Medium',
+                    'dimension': 'Validity',
+                    'issue': f"Mixed data types in column '{issue['column']}'",
+                    'recommendation': 'Standardize data types and handle inconsistent formats'
+                })
+        
+        # Enhanced Consistency recommendations
+        consistency = analysis['consistency']
+        if consistency['high_correlation_pairs']:
+            recommendations.append({
+                'priority': 'Medium',
+                'dimension': 'Consistency',
+                'issue': f"Found {len(consistency['high_correlation_pairs'])} highly correlated feature pairs",
+                'recommendation': 'Consider feature selection to remove redundant features'
+            })
+        
+        if consistency['distribution_issues']:
+            recommendations.append({
+                'priority': 'Low',
+                'dimension': 'Consistency',
+                'issue': f"Distribution issues in {len(consistency['distribution_issues'])} columns",
+                'recommendation': 'Consider data transformation (log, sqrt) for highly skewed features'
+            })
+        
+        # Advanced outlier recommendations
+        if consistency['outlier_columns']:
+            advanced_outlier_info = consistency.get('advanced_outlier_analysis', {})
+            if advanced_outlier_info:
+                outlier_rate = advanced_outlier_info.get('overall_outlier_rate', 0)
+                detection_method = advanced_outlier_info.get('detection_algorithm', 'Unknown')
+                
+                if outlier_rate > 10:
+                    priority = 'High'
+                    action = "Critical outlier contamination - investigate data collection process"
+                elif outlier_rate > 5:
+                    priority = 'Medium'
+                    action = "Significant outliers detected - consider robust preprocessing methods"
+                else:
+                    priority = 'Low'
+                    action = "Moderate outliers detected - investigate and handle appropriately"
+                
+                recommendations.append({
+                    'priority': priority,
+                    'dimension': 'Advanced Outliers',
+                    'issue': f"Outliers in {len(consistency['outlier_columns'])} columns (Rate: {outlier_rate:.1f}%, Method: {detection_method})",
+                    'recommendation': action
+                })
+            else:
+                recommendations.append({
+                    'priority': 'Medium',
+                    'dimension': 'Consistency',
+                    'issue': f"Outliers detected in {len(consistency['outlier_columns'])} columns",
+                    'recommendation': 'Investigate outliers - remove if errors, transform if valid extreme values'
+                })
+        
+        # Enhanced Relevance recommendations
+        if analysis['relevance']:
+            relevance = analysis['relevance']
+            if relevance['constant_features']:
+                recommendations.append({
+                    'priority': 'High',
+                    'dimension': 'Relevance',
+                    'issue': f"Constant features found: {relevance['constant_features']}",
+                    'recommendation': 'Remove constant features as they provide no predictive value'
+                })
+            
+            # Mutual information insights
+            if 'nonlinear_features_detected' in relevance:
+                nonlinear_count = relevance['nonlinear_features_detected']
+                if nonlinear_count > 0:
+                    recommendations.append({
+                        'priority': 'Medium',
+                        'dimension': 'Feature Engineering',
+                        'issue': f"Nonlinear relationships detected in {nonlinear_count} features",
+                        'recommendation': 'Consider nonlinear models (Random Forest, XGBoost) or polynomial features'
+                    })
+            
+            # Mutual information specific recommendations
+            if 'feature_target_mutual_info' in relevance:
+                mi_scores = relevance['feature_target_mutual_info']
+                if mi_scores:
+                    low_mi_features = [col for col, score in mi_scores.items() if score < 0.01]
+                    if len(low_mi_features) > len(mi_scores) * 0.3:  # More than 30% features have very low MI
+                        recommendations.append({
+                            'priority': 'Medium',
+                            'dimension': 'Feature Relevance',
+                            'issue': f"Many features ({len(low_mi_features)}) show low mutual information with target",
+                            'recommendation': 'Consider feature selection based on mutual information scores'
+                        })
+                    
+                    # Highlight top informative features
+                    if len(mi_scores) > 5:
+                        top_features = sorted(mi_scores.items(), key=lambda x: x[1], reverse=True)[:3]
+                        top_feature_names = [f[0] for f in top_features]
+                        recommendations.append({
+                            'priority': 'Low',
+                            'dimension': 'Feature Insights',
+                            'issue': f"Top informative features: {', '.join(top_feature_names)}",
+                            'recommendation': 'Focus on these high-information features for model interpretation'
+                        })
+        
+        return recommendations
+    
+    def set_dimension_weights(self, weights: Dict[str, float]):
+        """Update dimension weights for custom scoring"""
+        # Normalize weights to sum to 1.0
+        total_weight = sum(weights.values())
+        if total_weight > 0:
+            self.dimension_weights = {k: v/total_weight for k, v in weights.items()}
+    
+    def _format_text_report(self, analysis: Dict[str, Any]) -> str:
+        """Format analysis results as a detailed text report"""
+        if 'error' in analysis:
+            return f"Data Quality Analysis Error: {analysis['error']}"
+        
+        report = []
+        report.append("=" * 80)
+        report.append("ENHANCED DATA QUALITY ANALYSIS REPORT")
+        report.append("=" * 80)
+        report.append(f"Analysis Timestamp: {analysis.get('timestamp', 'Unknown')}")
+        report.append("")
+        
+        # Overall Score Section
+        overall_score = analysis.get('overall_score', 0)
+        quality_grade = analysis.get('quality_grade', 'Unknown')
+        report.append(f"📊 OVERALL QUALITY SCORE: {overall_score:.1f}/100 ({quality_grade})")
+        report.append("")
+        
+        # Dimension Scores
+        dimension_scores = analysis.get('dimension_scores', {})
+        report.append("📈 DIMENSION SCORES:")
+        for dimension, score in dimension_scores.items():
+            weight = self.dimension_weights.get(dimension, 0) * 100
+            report.append(f"  • {dimension.capitalize()}: {score:.1f}/100 (Weight: {weight:.0f}%)")
+        report.append("")
+        
+        # Basic Statistics
+        basic_stats = analysis.get('basic_stats', {})
+        report.append("📋 DATASET OVERVIEW:")
+        report.append(f"  • Total Rows: {basic_stats.get('total_rows', 0):,}")
+        report.append(f"  • Total Columns: {basic_stats.get('total_columns', 0):,}")
+        report.append(f"  • Numeric Columns: {basic_stats.get('numeric_columns', 0)}")
+        report.append(f"  • Categorical Columns: {basic_stats.get('categorical_columns', 0)}")
+        report.append(f"  • Memory Usage: {basic_stats.get('memory_usage_mb', 0):.2f} MB")
+        report.append("")
+        
+        # Completeness Analysis
+        completeness = analysis.get('completeness', {})
+        report.append("🔍 COMPLETENESS ANALYSIS:")
+        report.append(f"  • Missing Values: {completeness.get('total_missing_values', 0):,}")
+        report.append(f"  • Missing Percentage: {completeness.get('missing_percentage', 0):.2f}%")
+        report.append(f"  • Complete Rows: {completeness.get('row_completeness', 0):.1f}%")
+        report.append(f"  • Complete Columns: {completeness.get('column_completeness', 0):.1f}%")
+        
+        high_missing = completeness.get('high_missing_columns', {})
+        if high_missing:
+            report.append("  • Columns with >50% missing:")
+            for col, pct in list(high_missing.items())[:5]:  # Show top 5
+                report.append(f"    - {col}: {pct:.1f}%")
+        report.append("")
+        
+        # Uniqueness Analysis
+        uniqueness = analysis.get('uniqueness', {})
+        report.append("🔄 UNIQUENESS ANALYSIS:")
+        report.append(f"  • Duplicate Rows: {uniqueness.get('duplicate_rows', 0):,}")
+        report.append(f"  • Duplicate Percentage: {uniqueness.get('duplicate_percentage', 0):.2f}%")
+        report.append(f"  • Row Uniqueness: {uniqueness.get('row_uniqueness', 0):.1f}%")
+        
+        duplicate_cols = uniqueness.get('completely_duplicate_columns', [])
+        if duplicate_cols:
+            report.append("  • Completely Duplicate Column Groups:")
+            for group in duplicate_cols[:3]:  # Show first 3 groups
+                report.append(f"    - {', '.join(group)}")
+        report.append("")
+        
+        # Validity Analysis
+        validity = analysis.get('validity', {})
+        report.append("✅ VALIDITY ANALYSIS:")
+        report.append(f"  • Validity Score: {validity.get('validity_score', 0):.1f}/100")
+        report.append(f"  • Total Validity Issues: {validity.get('total_validity_issues', 0)}")
+        
+        mixed_types = validity.get('mixed_type_columns', [])
+        if mixed_types:
+            report.append("  • Mixed Data Type Issues:")
+            for issue in mixed_types[:3]:  # Show first 3
+                report.append(f"    - {issue['column']}: {issue['issue']}")
+        
+        high_card = validity.get('high_cardinality_columns', [])
+        if high_card:
+            report.append("  • High Cardinality Columns:")
+            for col_info in high_card[:3]:  # Show first 3
+                report.append(f"    - {col_info['column']}: {col_info['unique_values']} unique values")
+        report.append("")
+        
+        # Consistency Analysis
+        consistency = analysis.get('consistency', {})
+        report.append("🔗 CONSISTENCY ANALYSIS:")
+        report.append(f"  • Consistency Score: {consistency.get('consistency_score', 0):.1f}/100")
+        
+        high_corr = consistency.get('high_correlation_pairs', [])
+        if high_corr:
+            report.append("  • Highly Correlated Feature Pairs:")
+            for pair in high_corr[:3]:  # Show first 3
+                report.append(f"    - {pair['column1']} ↔ {pair['column2']}: {pair['correlation']:.3f}")
+        
+        dist_issues = consistency.get('distribution_issues', {})
+        if dist_issues:
+            report.append("  • Distribution Issues:")
+            for col, info in list(dist_issues.items())[:3]:  # Show first 3
+                issues_str = ', '.join(info['issues'])
+                report.append(f"    - {col}: {issues_str}")
+        
+        outlier_cols = consistency.get('outlier_columns', [])
+        if outlier_cols:
+            report.append("  • Columns with Outliers:")
+            for col_info in outlier_cols[:3]:  # Show first 3
+                method = col_info.get('detection_method', 'Unknown')
+                report.append(f"    - {col_info['column']}: {col_info['outlier_percentage']:.1f}% outliers ({method})")
+        
+        # Advanced outlier analysis summary
+        advanced_outlier = consistency.get('advanced_outlier_analysis', {})
+        if advanced_outlier:
+            report.append("  • Advanced Outlier Analysis:")
+            report.append(f"    - Detection Algorithm: {advanced_outlier.get('detection_algorithm', 'Unknown')}")
+            report.append(f"    - Overall Outlier Rate: {advanced_outlier.get('overall_outlier_rate', 0):.2f}%")
+            report.append(f"    - Total Outlier Cells: {advanced_outlier.get('total_outlier_cells', 0):,}")
+        report.append("")
+        
+        # Relevance Analysis
+        relevance = analysis.get('relevance')
+        if relevance:
+            report.append("🎯 RELEVANCE ANALYSIS:")
+            report.append(f"  • Relevance Score: {relevance.get('relevance_score', 0):.1f}/100")
+            report.append(f"  • Task Type: {relevance.get('task_type', 'Unknown')}")
+            
+            if relevance.get('constant_features'):
+                report.append(f"  • Constant Features: {len(relevance['constant_features'])}")
+                for feat in relevance['constant_features'][:3]:  # Show first 3
+                    report.append(f"    - {feat}")
+            
+            if relevance.get('low_variance_features'):
+                report.append(f"  • Low Variance Features: {len(relevance['low_variance_features'])}")
+            
+            # Traditional correlation analysis
+            if relevance.get('feature_target_correlations'):
+                top_corr = sorted(relevance['feature_target_correlations'].items(), 
+                                key=lambda x: x[1], reverse=True)[:5]
+                report.append("  • Top Feature-Target Correlations:")
+                for feat, corr in top_corr:
+                    report.append(f"    - {feat}: {corr:.3f}")
+            
+            # Advanced mutual information analysis
+            mi_features = relevance.get('feature_target_mutual_info', {})
+            if mi_features:
+                sorted_mi = sorted(mi_features.items(), key=lambda x: x[1], reverse=True)
+                report.append("  • Top Mutual Information Scores:")
+                for feat, mi_score in sorted_mi[:5]:  # Show top 5
+                    report.append(f"    - {feat}: {mi_score:.4f}")
+            
+            # Nonlinearity insights
+            nonlinear_count = relevance.get('nonlinear_features_detected', 0)
+            if nonlinear_count > 0:
+                report.append(f"  • Nonlinear Relationships Detected: {nonlinear_count} features")
+                
+                # Show examples of nonlinear features
+                nonlinear_examples = relevance.get('correlation_vs_mutual_info', {})
+                if nonlinear_examples:
+                    report.append("  • Nonlinear Feature Examples:")
+                    count = 0
+                    for feat, metrics in nonlinear_examples.items():
+                        if metrics['nonlinearity_indicator'] == 'High' and count < 3:
+                            ratio = metrics['mi_to_corr_ratio']
+                            report.append(f"    - {feat}: MI/Corr ratio = {ratio:.2f}")
+                            count += 1
+            report.append("")
+        
+        # Recommendations
+        recommendations = analysis.get('recommendations', [])
+        if recommendations:
+            report.append("💡 ACTIONABLE RECOMMENDATIONS:")
+            high_priority = [r for r in recommendations if r.get('priority') == 'High']
+            medium_priority = [r for r in recommendations if r.get('priority') == 'Medium']
+            
+            if high_priority:
+                report.append("  🔴 HIGH PRIORITY:")
+                for rec in high_priority:
+                    report.append(f"    • {rec['issue']}")
+                    report.append(f"      → {rec['recommendation']}")
+                    report.append("")
+            
+            if medium_priority:
+                report.append("  🟡 MEDIUM PRIORITY:")
+                for rec in medium_priority[:3]:  # Limit to first 3
+                    report.append(f"    • {rec['issue']}")
+                    report.append(f"      → {rec['recommendation']}")
+                    report.append("")
+        
+        report.append("=" * 80)
+        report.append("End of Report")
+        report.append("=" * 80)
+        
+        return "\n".join(report)
+
+    def export_report(self, analysis: Dict[str, Any], format_type: str = 'text') -> str:
+        """Export detailed quality report in specified format"""
+        if format_type == 'text':
+            return self._format_text_report(analysis)
+        elif format_type == 'json':
+            import json
+            return json.dumps(analysis, indent=2, default=str)
+        else:
+            return str(analysis)
 
 class AdvancedPreprocessing(QWidget):
     """高级数据预处理主界面"""
@@ -809,7 +1589,7 @@ class AdvancedPreprocessing(QWidget):
         self.original_y = None
         self.outlier_detector = OutlierDetector()
         self.smart_imputer = SmartImputer()
-        self.quality_analyzer = DataQualityAnalyzer()
+        self.quality_analyzer = EnhancedDataQualityAnalyzer()
         self.operation_history = OperationHistory()
         self.state_manager = StateManager()
         self.recommendation_engine = SmartRecommendationEngine()
@@ -1641,65 +2421,180 @@ class AdvancedPreprocessing(QWidget):
         self.auto_refresh_distribution_analysis()
     
     def analyze_data_quality(self):
-        """分析数据质量"""
+        """Analyze data quality using enhanced multi-dimensional framework"""
         if self.X is None:
+            self.quality_results_text.setText("No data available for analysis.")
             return
         
-        analysis = self.quality_analyzer.analyze(self.X)
-        self.quality_analysis_completed.emit(analysis)
-        
-        # 显示结果
-        result_text = self._format_quality_analysis(analysis)
-        self.quality_results_text.setText(result_text)
+        try:
+            # Use enhanced analyzer with target variable if available
+            analysis = self.quality_analyzer.analyze(self.X, self.y)
+            
+            # Display formatted results
+            result_text = self._format_quality_analysis(analysis)
+            self.quality_results_text.setText(result_text)
+            
+            # Emit signal with analysis results
+            self.quality_analysis_completed.emit(analysis)
+            
+        except Exception as e:
+            error_msg = f"Data quality analysis failed: {str(e)}"
+            self.quality_results_text.setText(error_msg)
+            print(f"Error in analyze_data_quality: {str(e)}")
     
     def _format_quality_analysis(self, analysis: Dict[str, Any]) -> str:
-        """Format quality analysis results with performance metrics"""
+        """Format enhanced quality analysis results for display"""
+        if 'error' in analysis:
+            return f"❌ Data Quality Analysis Error:\n{analysis['error']}"
+        
         # Get performance metrics
         performance_metrics = self.performance_optimizer.get_memory_usage(self.X)
         is_large = self.performance_optimizer.is_large_dataset(self.X)
         
-        text = f"""🔍 Enhanced Data Quality Analysis Report
-{'='*60}
+        # Extract key metrics
+        overall_score = analysis.get('overall_score', 0)
+        quality_grade = analysis.get('quality_grade', 'Unknown')
+        basic_stats = analysis.get('basic_stats', {})
+        dimension_scores = analysis.get('dimension_scores', {})
+        completeness = analysis.get('completeness', {})
+        uniqueness = analysis.get('uniqueness', {})
+        validity = analysis.get('validity', {})
+        consistency = analysis.get('consistency', {})
+        relevance = analysis.get('relevance', {})
+        recommendations = analysis.get('recommendations', [])
+        
+        text = f"""🔍 ENHANCED DATA QUALITY ANALYSIS REPORT
+{'='*70}
 
-⭐ Overall Quality Score: {analysis['quality_score']:.1f}/100
+⭐ OVERALL QUALITY SCORE: {overall_score:.1f}/100 ({quality_grade})
+Analysis Timestamp: {analysis.get('timestamp', 'Unknown')}
 
-📊 Basic Statistics:
-• Number of rows: {analysis['basic_stats']['n_rows']:,}
-• Number of columns: {analysis['basic_stats']['n_columns']}
-• Memory usage: {analysis['basic_stats']['memory_usage_mb']:.2f} MB
-• Numeric columns: {analysis['basic_stats']['numeric_columns']}
-• Categorical columns: {analysis['basic_stats']['categorical_columns']}
+📊 DATASET OVERVIEW:
+• Total Rows: {basic_stats.get('total_rows', 0):,}
+• Total Columns: {basic_stats.get('total_columns', 0)}
+• Memory Usage: {basic_stats.get('memory_usage_mb', 0):.2f} MB
+• Numeric Columns: {basic_stats.get('numeric_columns', 0)}
+• Categorical Columns: {basic_stats.get('categorical_columns', 0)}
 
-🚀 Performance Metrics:
-• Dataset size: {'Large (>100MB)' if is_large else 'Optimal (<100MB)'}
-• Memory per row: {performance_metrics.get('mb_per_row', 0):.6f} MB
-• Optimization potential: {'High' if is_large else 'Low'}
+🚀 PERFORMANCE METRICS:
+• Dataset Size: {'Large (>100MB)' if is_large else 'Optimal (<100MB)'}
+• Memory per Row: {performance_metrics.get('mb_per_row', 0):.6f} MB
+• Optimization Potential: {'High' if is_large else 'Low'}
 
-🧩 Missing Data:
-• Total missing: {analysis['missing_data']['total_missing']:,}
-• Columns with missing: {analysis['missing_data']['columns_with_missing']}
-• Worst column: {analysis['missing_data']['worst_column']} ({analysis['missing_data']['worst_percentage']:.1f}%)
-
-🔄 Duplicates:
-• Total duplicates: {analysis['duplicates']['total_duplicates']:,}
-• Duplicate ratio: {analysis['duplicates']['percentage']:.2f}%
-
+📈 DIMENSION SCORES:
 """
         
-        if 'high_correlation_pairs' in analysis['correlation']:
-            text += f"""🔗 Correlation Analysis:
-• High correlation pairs: {len(analysis['correlation']['high_correlation_pairs'])}
-"""
-            for pair in analysis['correlation']['high_correlation_pairs'][:5]:
-                text += f"  - {pair['feature1']} vs {pair['feature2']}: {pair['correlation']:.3f}\n"
+        # Add dimension scores with weights
+        for dimension, score in dimension_scores.items():
+            weight = self.quality_analyzer.dimension_weights.get(dimension, 0) * 100
+            text += f"• {dimension.capitalize()}: {score:.1f}/100 (Weight: {weight:.0f}%)\n"
         
-        # Add recommendations based on analysis
         text += f"""
-💡 Smart Recommendations:
-• {'Enable data type optimization' if is_large else 'Data types already optimized'}
-• {'Consider sampling for visualization' if len(self.X) > 10000 else 'Dataset size is manageable'}
-• {'High priority: Handle missing values' if analysis['missing_data']['total_missing'] > 0 else 'No missing values detected'}
-• {'Medium priority: Remove duplicates' if analysis['duplicates']['total_duplicates'] > 0 else 'No duplicates found'}
+🔍 COMPLETENESS ANALYSIS:
+• Missing Values: {completeness.get('total_missing_values', 0):,} ({completeness.get('missing_percentage', 0):.2f}%)
+• Complete Rows: {completeness.get('row_completeness', 0):.1f}%
+• Complete Columns: {completeness.get('column_completeness', 0):.1f}%
+• Columns with Missing: {completeness.get('columns_with_missing', 0)}
+"""
+        
+        # Show high missing columns
+        high_missing = completeness.get('high_missing_columns', {})
+        if high_missing:
+            text += "• Columns with >50% Missing:\n"
+            for col, pct in list(high_missing.items())[:3]:
+                text += f"  - {col}: {pct:.1f}%\n"
+        
+        text += f"""
+🔄 UNIQUENESS ANALYSIS:
+• Duplicate Rows: {uniqueness.get('duplicate_rows', 0):,} ({uniqueness.get('duplicate_percentage', 0):.2f}%)
+• Row Uniqueness: {uniqueness.get('row_uniqueness', 0):.1f}%
+"""
+        
+        # Show duplicate column groups
+        duplicate_cols = uniqueness.get('completely_duplicate_columns', [])
+        if duplicate_cols:
+            text += "• Duplicate Column Groups:\n"
+            for group in duplicate_cols[:2]:
+                text += f"  - {', '.join(group)}\n"
+        
+        text += f"""
+✅ VALIDITY ANALYSIS:
+• Validity Score: {validity.get('validity_score', 0):.1f}/100
+• Total Issues: {validity.get('total_validity_issues', 0)}
+"""
+        
+        # Show validity issues
+        mixed_types = validity.get('mixed_type_columns', [])
+        if mixed_types:
+            text += "• Mixed Data Type Issues:\n"
+            for issue in mixed_types[:2]:
+                text += f"  - {issue['column']}: {issue['issue']}\n"
+        
+        text += f"""
+🔗 CONSISTENCY ANALYSIS:
+• Consistency Score: {consistency.get('consistency_score', 0):.1f}/100
+• Total Issues: {consistency.get('total_consistency_issues', 0)}
+"""
+        
+        # Show correlation issues
+        high_corr = consistency.get('high_correlation_pairs', [])
+        if high_corr:
+            text += "• Highly Correlated Pairs:\n"
+            for pair in high_corr[:3]:
+                text += f"  - {pair['column1']} ↔ {pair['column2']}: {pair['correlation']:.3f}\n"
+        
+        # Show distribution issues
+        dist_issues = consistency.get('distribution_issues', {})
+        if dist_issues:
+            text += "• Distribution Issues:\n"
+            for col, info in list(dist_issues.items())[:2]:
+                issues_str = ', '.join(info['issues'])
+                text += f"  - {col}: {issues_str}\n"
+        
+        # Relevance analysis (if target variable available)
+        if relevance:
+            text += f"""
+🎯 RELEVANCE ANALYSIS:
+• Relevance Score: {relevance.get('relevance_score', 0):.1f}/100
+• Task Type: {relevance.get('task_type', 'Unknown')}
+"""
+            if relevance.get('constant_features'):
+                text += f"• Constant Features: {len(relevance['constant_features'])}\n"
+            
+            if relevance.get('feature_target_correlations'):
+                top_corr = sorted(relevance['feature_target_correlations'].items(), 
+                                key=lambda x: x[1], reverse=True)[:3]
+                text += "• Top Feature-Target Correlations:\n"
+                for feat, corr in top_corr:
+                    text += f"  - {feat}: {corr:.3f}\n"
+        
+        # Recommendations
+        if recommendations:
+            text += f"""
+💡 ACTIONABLE RECOMMENDATIONS:
+"""
+            high_priority = [r for r in recommendations if r.get('priority') == 'High']
+            medium_priority = [r for r in recommendations if r.get('priority') == 'Medium']
+            
+            if high_priority:
+                text += "🔴 HIGH PRIORITY:\n"
+                for rec in high_priority[:3]:
+                    text += f"• {rec['issue']}\n"
+                    text += f"  → {rec['recommendation']}\n\n"
+            
+            if medium_priority:
+                text += "🟡 MEDIUM PRIORITY:\n"
+                for rec in medium_priority[:2]:
+                    text += f"• {rec['issue']}\n"
+                    text += f"  → {rec['recommendation']}\n\n"
+        
+        text += f"""
+{'='*70}
+💡 NEXT STEPS:
+• Use the Enhanced Missing Value Imputation tab for data cleaning
+• Apply recommended transformations in the Data Transformation tab
+• Monitor data quality improvements after each operation
+{'='*70}
 """
         
         return text
@@ -3464,8 +4359,8 @@ Data Dimensions: {original_shape} → {new_shape}"""
             if self.X is None:
                 QMessageBox.information(
                     self, 
-                    "数据状态", 
-                    "❌ 当前没有加载数据\n\n请先从数据管理模块加载数据。"
+                    "Data Status", 
+                    "❌ No data currently loaded\n\nPlease load data from the Data Management module first."
                 )
                 return
             
@@ -3477,48 +4372,48 @@ Data Dimensions: {original_shape} → {new_shape}"""
                 except:
                     data_changed = True
             
-            # 生成状态报告
+            # Generate status report
             operations_count = len(self.operation_history.operations)
             missing_values = self.X.isnull().sum().sum()
             
-            status_msg = f"📊 **当前数据状态报告**\n\n"
-            status_msg += f"数据形状: {self.X.shape}\n"
-            status_msg += f"缺失值数量: {missing_values}\n"
-            status_msg += f"执行的操作数量: {operations_count}\n\n"
+            status_msg = f"📊 **Current Data Status Report**\n\n"
+            status_msg += f"Data Shape: {self.X.shape}\n"
+            status_msg += f"Missing Values: {missing_values}\n"
+            status_msg += f"Operations Performed: {operations_count}\n\n"
             
             if data_changed:
-                status_msg += f"✅ 数据已被处理（与原始数据不同）\n"
+                status_msg += f"✅ Data has been processed (different from original)\n"
             else:
-                status_msg += f"⚠️ 数据未被处理（与原始数据相同）\n"
+                status_msg += f"⚠️ Data unchanged (same as original)\n"
             
             if operations_count > 0:
-                status_msg += f"\n📋 **操作历史**:\n"
+                status_msg += f"\n📋 **Operation History**:\n"
                 try:
                     for i, op in enumerate(self.operation_history.operations, 1):
-                        # 安全地获取操作类型，提供默认值
-                        op_type = op.get('type', op.get('operation_type', '未知操作'))
-                        op_time = op.get('timestamp', '未知时间')
+                        # Safely get operation type with fallback values
+                        op_type = op.get('type', op.get('operation_type', op.get('operation', 'Unknown Operation')))
+                        op_time = op.get('timestamp', 'Unknown Time')
                         status_msg += f"{i}. {op_type} ({op_time})\n"
                 except Exception as e:
-                    status_msg += f"• 操作历史加载出错: {str(e)}\n"
+                    status_msg += f"• Operation history loading error: {str(e)}\n"
             else:
-                status_msg += f"\n💡 **建议**: 执行一些预处理操作，如:\n"
-                status_msg += f"• 处理缺失值\n"
-                status_msg += f"• 检测和处理异常值\n"
-                status_msg += f"• 数据变换/标准化\n"
+                status_msg += f"\n💡 **Suggestions**: Perform preprocessing operations such as:\n"
+                status_msg += f"• Handle missing values\n"
+                status_msg += f"• Detect and handle outliers\n"
+                status_msg += f"• Apply data transformations/standardization\n"
             
-            status_msg += f"\n📋 **下一步**: 完成预处理后，点击'Apply Processing Results'按钮将数据传递到特征选择模块。"
+            status_msg += f"\n📋 **Next Steps**: After completing preprocessing, click 'Apply Processing Results' to pass data to the feature selection module."
             
             QMessageBox.information(
                 self, 
-                "数据处理状态", 
+                "Data Processing Status", 
                 status_msg
             )
             
         except Exception as e:
-            # 如果出现任何错误，显示友好的错误消息
+            # If any error occurs, show a friendly error message
             QMessageBox.critical(
                 self,
-                "状态检查错误",
-                f"检查数据状态时出现错误:\n\n{str(e)}\n\n请尝试重新加载数据或重启程序。"
+                "Status Check Error",
+                f"Error occurred while checking data status:\n\n{str(e)}\n\nPlease try reloading data or restarting the program."
             ) 
