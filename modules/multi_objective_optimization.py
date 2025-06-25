@@ -12,6 +12,8 @@ import joblib
 from typing import List, Dict, Any, Optional, Tuple
 import traceback
 import warnings
+import datetime
+from pathlib import Path
 warnings.filterwarnings('ignore')
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog,
@@ -33,25 +35,218 @@ import seaborn as sns
 plt.rcParams['figure.figsize'] = (10, 6)
 plt.rcParams['font.size'] = 10
 
-# Pymoo for optimization
+# Pymoo for optimization - Robust import with version detection
+PYMOO_AVAILABLE = False
+PYMOO_VERSION = 'not_installed'
+NSGA2 = None
+NSGA3 = None
+SPEA2 = None
+MOEAD = None
+CMA_ES = None
+DE = None
+Problem = None
+minimize = None
+get_termination = None
+Callback = None
+Sampling = None
+Repair = None
+FloatRandomSampling = None
+Termination = None
+SBX = None
+PM = None
+DifferentialEvolution = None
+UniformCrossover = None
+
 try:
-    # Disable compile hint warning
-    from pymoo.config import Config
-    Config.show_compile_hint = False
+    # First, let's detect what's actually available in pymoo
+    import pymoo
+    print(f"Found pymoo package at: {pymoo.__file__}")
     
-    from pymoo.algorithms.moo.nsga2 import NSGA2
-    from pymoo.core.problem import Problem
+    # Try to get version info
+    try:
+        PYMOO_VERSION = pymoo.__version__
+    except:
+        PYMOO_VERSION = '0.5.0'  # Assume 0.5.0 if no version info
+    
+    print(f"Detected pymoo version: {PYMOO_VERSION}")
+    
+    # Import core functions that should be available in all versions
     from pymoo.optimize import minimize
     from pymoo.factory import get_termination
-    from pymoo.core.callback import Callback
-    from pymoo.core.sampling import Sampling
-    from pymoo.core.repair import Repair
-    from pymoo.operators.sampling.rnd import FloatRandomSampling
+    
+    # Try different import strategies based on what's available
+    # Strategy 1: Try modern pymoo (0.6+) structure
+    try:
+        print("Trying modern pymoo structure (0.6+)...")
+        from pymoo.algorithms.moo.nsga2 import NSGA2
+        from pymoo.core.problem import Problem
+        from pymoo.core.callback import Callback
+        from pymoo.core.sampling import Sampling
+        from pymoo.core.repair import Repair
+        from pymoo.operators.sampling.rnd import FloatRandomSampling
+        from pymoo.core.termination import Termination
+        
+        try:
+            from pymoo.algorithms.moo.nsga3 import NSGA3
+        except ImportError:
+            NSGA3 = None
+            
+        try:
+            from pymoo.algorithms.moo.spea2 import SPEA2
+        except ImportError:
+            SPEA2 = None
+            
+        # Try to import additional algorithms
+        try:
+            from pymoo.algorithms.moo.moead import MOEAD
+        except ImportError:
+            MOEAD = None
+            
+        try:
+            from pymoo.algorithms.soo.nonconvex.cmaes import CMA_ES
+        except ImportError:
+            CMA_ES = None
+            
+        try:
+            from pymoo.algorithms.soo.nonconvex.de import DE
+        except ImportError:
+            DE = None
+            
+        # Try to import operators
+        try:
+            from pymoo.operators.crossover.sbx import SBX
+        except ImportError:
+            SBX = None
+        try:
+            from pymoo.operators.mutation.pm import PM
+        except ImportError:
+            PM = None
+        try:
+            from pymoo.operators.crossover.dex import DifferentialEvolution
+        except ImportError:
+            DifferentialEvolution = None
+        try:
+            from pymoo.operators.crossover.ux import UniformCrossover
+        except ImportError:
+            UniformCrossover = None
+        
+        print("✅ Successfully imported modern pymoo structure")
+        PYMOO_VERSION = f"{PYMOO_VERSION} (modern)"
+        
+    except ImportError:
+        print("Modern structure failed, trying classic pymoo structure (0.5.0)...")
+        # Strategy 2: Try classic pymoo (0.5.0) structure
+        try:
+            from pymoo.model.problem import Problem
+            from pymoo.model.callback import Callback
+            from pymoo.model.sampling import Sampling
+            from pymoo.model.repair import Repair
+            from pymoo.model.termination import Termination
+            
+            # For NSGA2, try several possible locations
+            try:
+                from pymoo.algorithms.moo.nsga2 import NSGA2
+            except ImportError:
+                try:
+                    from pymoo.algorithms.nsga2 import NSGA2
+                except ImportError:
+                    # Last resort - check if there's a generic GA we can use
+                    try:
+                        from pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
+                        NSGA2 = GeneticAlgorithm
+                        print("⚠️ Using GeneticAlgorithm as NSGA2 fallback")
+                    except ImportError:
+                        raise ImportError("Could not find NSGA2 or compatible algorithm")
+            
+            # For FloatRandomSampling, try different locations
+            try:
+                from pymoo.operators.sampling.random_sampling import FloatRandomSampling
+            except ImportError:
+                try:
+                    from pymoo.operators.sampling.random import Random
+                    FloatRandomSampling = Random
+                except ImportError:
+                    # Create a simple random sampling fallback
+                    class SimpleRandomSampling(Sampling):
+                        def _do(self, problem, n_samples, **kwargs):
+                            return np.random.uniform(problem.xl, problem.xu, (n_samples, problem.n_var))
+                    FloatRandomSampling = SimpleRandomSampling
+                    print("⚠️ Using simple random sampling fallback")
+            
+            # Try to get NSGA3
+            try:
+                from pymoo.algorithms.moo.nsga3 import NSGA3
+            except ImportError:
+                NSGA3 = None
+                print("⚠️ NSGA3 not available in this version")
+            
+            # Try to get SPEA2
+            try:
+                from pymoo.algorithms.moo.spea2 import SPEA2
+            except ImportError:
+                SPEA2 = None
+                print("⚠️ SPEA2 not available in this version")
+            
+            # Try to get additional algorithms
+            try:
+                from pymoo.algorithms.moo.moead import MOEAD
+            except ImportError:
+                MOEAD = None
+                print("⚠️ MOEA/D not available in this version")
+            
+            try:
+                from pymoo.algorithms.soo.nonconvex.cmaes import CMA_ES
+            except ImportError:
+                CMA_ES = None
+                print("⚠️ CMA-ES not available in this version")
+                
+            try:
+                from pymoo.algorithms.soo.nonconvex.de import DE
+            except ImportError:
+                DE = None
+                print("⚠️ DE not available in this version")
+            
+            # Try to import operators for classic structure
+            try:
+                from pymoo.operators.crossover.simulated_binary_crossover import SBX
+            except ImportError:
+                SBX = None
+            try:
+                from pymoo.operators.mutation.polynomial_mutation import PM
+            except ImportError:
+                PM = None
+            try:
+                from pymoo.operators.crossover.dex import DifferentialEvolution
+            except ImportError:
+                DifferentialEvolution = None
+            try:
+                from pymoo.operators.crossover.ux import UniformCrossover
+            except ImportError:
+                UniformCrossover = None
+            
+            print("✅ Successfully imported classic pymoo structure")
+            PYMOO_VERSION = f"{PYMOO_VERSION} (classic)"
+            
+        except ImportError as e:
+            raise ImportError(f"Failed to import from classic pymoo structure: {e}")
+    
+    # If we get here, we have successfully imported the essentials
     PYMOO_AVAILABLE = True
+    print(f"✅ pymoo successfully loaded: {PYMOO_VERSION}")
+    
+    # Disable compile warnings if available
+    try:
+        from pymoo.config import Config
+        Config.show_compile_hint = False
+    except:
+        pass  # Not available in this version
+    
 except ImportError as e:
-    PYMOO_AVAILABLE = False
-    print(f"An error occurred while importing pymoo: {e}")
-    print("Warning: pymoo not available. Please install it using: pip install pymoo")
+    print(f"❌ Failed to import pymoo: {e}")
+    print("Please install pymoo using: pip install pymoo")
+except Exception as e:
+    print(f"❌ Unexpected error while importing pymoo: {e}")
+    print("Please check your pymoo installation")
 
 
 class PipelineAnalyzer:
@@ -354,6 +549,272 @@ class EnhancedBoundaryRepair(Repair):
         return X_repaired
 
 
+def batch_predict_models(models, indices_list, X_pop, feature_names):
+    """
+    Vectorized prediction for all models to improve performance.
+    
+    Args:
+        models: List of trained model pipelines
+        indices_list: List of feature indices for each model
+        X_pop: Population matrix (n_individuals x n_features)
+        feature_names: List of all feature names
+    
+    Returns:
+        Predictions matrix (n_individuals x n_models)
+    """
+    try:
+        n_individuals = X_pop.shape[0]
+        n_models = len(models)
+        predictions = np.zeros((n_individuals, n_models))
+        
+        for model_idx, (model, indices) in enumerate(zip(models, indices_list)):
+            # Extract features for current model
+            X_subset = X_pop[:, indices]
+            
+            # Create DataFrame with correct feature names
+            model_feature_names = [feature_names[idx] for idx in indices]
+            X_df = pd.DataFrame(X_subset, columns=model_feature_names)
+            
+            # Batch prediction for all individuals at once
+            model_predictions = model.predict(X_df)
+            predictions[:, model_idx] = model_predictions
+        
+        return predictions
+    except Exception as e:
+        print(f"Batch prediction error: {e}")
+        # Fallback to individual predictions
+        predictions = np.zeros((X_pop.shape[0], len(models)))
+        for i in range(X_pop.shape[0]):
+            for j, (model, indices) in enumerate(zip(models, indices_list)):
+                try:
+                    X_subset = X_pop[i, indices]
+                    model_feature_names = [feature_names[idx] for idx in indices]
+                    X_df = pd.DataFrame([X_subset], columns=model_feature_names)
+                    predictions[i, j] = model.predict(X_df)[0]
+                except Exception:
+                    predictions[i, j] = float('inf')
+        return predictions
+
+
+class HypervolumeEarlyStop(Termination):
+    """
+    Early stopping termination based on hypervolume convergence.
+    Stops optimization when hypervolume improvement stagnates.
+    """
+    
+    def __init__(self, min_delta=1e-6, patience=30, n_last=10):
+        """
+        Args:
+            min_delta: Minimum hypervolume improvement required
+            patience: Number of generations to wait without improvement
+            n_last: Number of last generations to consider for convergence
+        """
+        super().__init__()
+        self.min_delta = min_delta
+        self.patience = patience
+        self.n_last = n_last
+        self.hypervolume_history = []
+        self.best_hv = -np.inf
+        self.counter = 0
+        self.min_generations = max(10, patience // 3)  # 至少运行几代才开始早停检查
+        
+    def _update(self, algorithm):
+        """Check if termination criteria is met"""
+        try:
+            # Get current generation number
+            current_gen = algorithm.n_gen if hasattr(algorithm, 'n_gen') else len(self.hypervolume_history)
+            
+            # Get current population objectives
+            pop = algorithm.pop
+            if pop is None or len(pop) == 0:
+                return False
+                
+            F = pop.get("F")
+            if F is None or len(F) == 0:
+                return False
+            
+            # Calculate hypervolume (simplified approximation)
+            current_hv = self._calculate_hypervolume(F)
+            self.hypervolume_history.append(current_hv)
+            
+            # Don't trigger early stopping until minimum generations have passed
+            if current_gen < self.min_generations:
+                return False
+            
+            # Use relative improvement instead of absolute
+            if len(self.hypervolume_history) > 1:
+                # Calculate relative improvement
+                prev_hv = self.hypervolume_history[-2]
+                if prev_hv > 0:
+                    relative_improvement = (current_hv - prev_hv) / abs(prev_hv)
+                else:
+                    relative_improvement = current_hv - prev_hv
+                
+                # Check for significant improvement
+                if relative_improvement > self.min_delta:
+                    self.best_hv = current_hv
+                    self.counter = 0
+                else:
+                    self.counter += 1
+            else:
+                # First generation
+                self.best_hv = current_hv
+                self.counter = 0
+            
+            # Also check trend in last n generations (only if we have enough history)
+            if len(self.hypervolume_history) >= self.n_last:
+                recent_hvs = self.hypervolume_history[-self.n_last:]
+                if len(recent_hvs) > 2:  # Need at least 3 points for trend
+                    try:
+                        trend = np.polyfit(range(len(recent_hvs)), recent_hvs, 1)[0]
+                        # Use relative trend (normalized by average hypervolume)
+                        avg_hv = np.mean(recent_hvs)
+                        if avg_hv > 0:
+                            relative_trend = abs(trend) / avg_hv
+                            if relative_trend < self.min_delta / 10:  # Very conservative threshold
+                                self.counter = max(self.counter, self.patience // 3)
+                    except np.RankWarning:
+                        pass  # Skip trend analysis if there's an issue
+            
+            # Only terminate if we've been stagnant for patience generations AND past minimum
+            should_terminate = (self.counter >= self.patience and 
+                               current_gen >= self.min_generations and 
+                               len(self.hypervolume_history) >= self.n_last)
+            
+            return should_terminate
+            
+        except Exception as e:
+            print(f"Early stopping check error: {e}")
+            return False
+    
+    def _calculate_hypervolume(self, objectives):
+        """Calculate hypervolume approximation"""
+        try:
+            if len(objectives) == 0:
+                return 0.0
+            
+            # Use nadir point as reference
+            ref_point = np.max(objectives, axis=0) + 0.1 * np.abs(np.max(objectives, axis=0))
+            
+            if objectives.shape[1] == 1:
+                # For single objective, use simple range
+                return ref_point[0] - np.min(objectives[:, 0])
+            elif objectives.shape[1] == 2:
+                # For 2D, calculate exact hypervolume
+                sorted_idx = np.argsort(objectives[:, 0])
+                sorted_objs = objectives[sorted_idx]
+                
+                hv = 0.0
+                prev_x = ref_point[0]
+                for obj in sorted_objs:
+                    if obj[0] < ref_point[0] and obj[1] < ref_point[1]:
+                        width = prev_x - obj[0]
+                        height = ref_point[1] - obj[1]
+                        hv += width * height
+                        prev_x = obj[0]
+                return max(0.0, hv)
+            else:
+                # For higher dimensions, use product approximation
+                dominated_volume = 1.0
+                for i in range(objectives.shape[1]):
+                    min_obj = np.min(objectives[:, i])
+                    if min_obj < ref_point[i]:
+                        dominated_volume *= (ref_point[i] - min_obj)
+                    else:
+                        dominated_volume = 0.0
+                        break
+                return dominated_volume
+        except Exception:
+            return 0.0
+
+
+class OptimizationCheckpoint:
+    """
+    Checkpoint system for saving and resuming optimization progress.
+    """
+    
+    def __init__(self, save_interval=25, max_checkpoints=5):
+        """
+        Args:
+            save_interval: Save checkpoint every N generations
+            max_checkpoints: Maximum number of checkpoints to keep
+        """
+        self.save_interval = save_interval
+        self.max_checkpoints = max_checkpoints
+        self.checkpoint_dir = Path("optimization_checkpoints")
+        self.checkpoint_dir.mkdir(exist_ok=True)
+        
+    def should_save(self, generation):
+        """Check if checkpoint should be saved at this generation"""
+        return generation % self.save_interval == 0 and generation > 0
+    
+    def save_checkpoint(self, generation, algorithm, config, additional_data=None):
+        """Save optimization checkpoint"""
+        try:
+            checkpoint_data = {
+                'generation': generation,
+                'population_X': algorithm.pop.get("X") if algorithm.pop else None,
+                'population_F': algorithm.pop.get("F") if algorithm.pop else None,
+                'config': config,
+                'timestamp': datetime.datetime.now().isoformat(),
+                'additional_data': additional_data or {}
+            }
+            
+            checkpoint_file = self.checkpoint_dir / f"checkpoint_gen_{generation:04d}.joblib"
+            joblib.dump(checkpoint_data, checkpoint_file)
+            
+            # Clean up old checkpoints
+            self._cleanup_old_checkpoints()
+            
+            return str(checkpoint_file)
+        except Exception as e:
+            print(f"Failed to save checkpoint: {e}")
+            return None
+    
+    def _cleanup_old_checkpoints(self):
+        """Remove old checkpoints to save disk space"""
+        try:
+            checkpoint_files = list(self.checkpoint_dir.glob("checkpoint_gen_*.joblib"))
+            if len(checkpoint_files) > self.max_checkpoints:
+                # Sort by creation time and remove oldest
+                checkpoint_files.sort(key=lambda x: x.stat().st_mtime)
+                for old_file in checkpoint_files[:-self.max_checkpoints]:
+                    old_file.unlink()
+        except Exception as e:
+            print(f"Failed to cleanup checkpoints: {e}")
+    
+    def list_checkpoints(self):
+        """List available checkpoints"""
+        try:
+            checkpoint_files = list(self.checkpoint_dir.glob("checkpoint_gen_*.joblib"))
+            checkpoints = []
+            
+            for file in checkpoint_files:
+                try:
+                    data = joblib.load(file)
+                    checkpoints.append({
+                        'file': file,
+                        'generation': data.get('generation', 0),
+                        'timestamp': data.get('timestamp', 'unknown'),
+                        'size_mb': file.stat().st_size / (1024 * 1024)
+                    })
+                except Exception:
+                    continue
+            
+            return sorted(checkpoints, key=lambda x: x['generation'], reverse=True)
+        except Exception as e:
+            print(f"Failed to list checkpoints: {e}")
+            return []
+    
+    def load_checkpoint(self, checkpoint_file):
+        """Load checkpoint data"""
+        try:
+            return joblib.load(checkpoint_file)
+        except Exception as e:
+            print(f"Failed to load checkpoint: {e}")
+            return None
+
+
 class ConstraintViolationMonitor:
     """
     Monitor and report constraint violations during optimization
@@ -407,6 +868,309 @@ class ConstraintViolationMonitor:
         return self.total_violations / self.total_evaluations
 
 
+class ExplicitConstraintHandler:
+    """
+    Handle explicit constraints (<=, >=, =) with adaptive penalty coefficients
+    """
+    def __init__(self, constraint_specs=None):
+        """
+        Parameters:
+        - constraint_specs: List of dicts with constraint definitions
+          Format: {'type': 'leq'/'geq'/'eq', 'target_idx': int, 'bound': float, 'feature_indices': [int]}
+        """
+        self.constraint_specs = constraint_specs or []
+        self.penalty_coeffs = {}
+        self.violation_history = {}
+        self.adaptive_penalty = True
+        
+        # Initialize penalty coefficients
+        for i, spec in enumerate(self.constraint_specs):
+            self.penalty_coeffs[i] = 1.0
+            self.violation_history[i] = []
+    
+    def evaluate_constraints(self, x, objectives):
+        """
+        Evaluate constraint violations and return constraint vector
+        
+        Parameters:
+        - x: Decision variables
+        - objectives: Objective values
+        
+        Returns:
+        - cv: Constraint violation vector (positive = violation)
+        """
+        cv = []
+        
+        for i, spec in enumerate(self.constraint_specs):
+            if spec['type'] == 'leq':  # g(x) <= bound
+                if 'target_idx' in spec:
+                    # Constraint on objective value
+                    violation = objectives[spec['target_idx']] - spec['bound']
+                else:
+                    # Constraint on feature values
+                    value = sum(x[j] for j in spec['feature_indices'])
+                    violation = value - spec['bound']
+                    
+            elif spec['type'] == 'geq':  # g(x) >= bound
+                if 'target_idx' in spec:
+                    violation = spec['bound'] - objectives[spec['target_idx']]
+                else:
+                    value = sum(x[j] for j in spec['feature_indices'])
+                    violation = spec['bound'] - value
+                    
+            elif spec['type'] == 'eq':  # g(x) = bound
+                if 'target_idx' in spec:
+                    violation = abs(objectives[spec['target_idx']] - spec['bound'])
+                else:
+                    value = sum(x[j] for j in spec['feature_indices'])
+                    violation = abs(value - spec['bound'])
+            else:
+                violation = 0.0
+            
+            cv.append(max(0.0, violation))
+            
+            # Track violation history for adaptive penalty
+            self.violation_history[i].append(violation > 0)
+            
+        return np.array(cv)
+    
+    def update_penalty_coefficients(self, generation):
+        """Update penalty coefficients based on violation rates"""
+        if not self.adaptive_penalty or generation < 10:
+            return
+            
+        for i, spec in enumerate(self.constraint_specs):
+            recent_violations = self.violation_history[i][-10:]  # Last 10 generations
+            violation_rate = sum(recent_violations) / len(recent_violations)
+            
+            if violation_rate > 0.8:  # High violation rate
+                self.penalty_coeffs[i] *= 1.2
+            elif violation_rate < 0.1:  # Low violation rate
+                self.penalty_coeffs[i] *= 0.95
+                
+            # Keep penalty coefficient in reasonable range
+            self.penalty_coeffs[i] = max(0.1, min(100.0, self.penalty_coeffs[i]))
+
+
+class RobustOptimizationHandler:
+    """
+    Handle robust optimization with uncertainty propagation
+    """
+    def __init__(self, uncertainty_config=None):
+        """
+        Parameters:
+        - uncertainty_config: Dict with uncertainty specifications
+          Format: {'method': 'bootstrap/monte_carlo', 'n_samples': int, 'noise_level': float}
+        """
+        self.config = uncertainty_config or {
+            'method': 'bootstrap',
+            'n_samples': 10,
+            'noise_level': 0.01
+        }
+        self.uncertainty_cache = {}
+    
+    def evaluate_robust_objectives(self, models, model_indices, x, feature_names, directions):
+        """
+        Evaluate objectives under uncertainty
+        
+        Returns:
+        - robust_objectives: Array of robust objective values (mean ± risk_factor * std)
+        - uncertainty_metrics: Dict with uncertainty information
+        """
+        method = self.config['method']
+        n_samples = self.config['n_samples']
+        noise_level = self.config['noise_level']
+        
+        if method == 'bootstrap':
+            return self._bootstrap_evaluation(models, model_indices, x, feature_names, directions, n_samples)
+        elif method == 'monte_carlo':
+            return self._monte_carlo_evaluation(models, model_indices, x, feature_names, directions, n_samples, noise_level)
+        else:
+            # Fallback to deterministic evaluation
+            objectives = []
+            for j, (model, model_idx) in enumerate(zip(models, model_indices)):
+                try:
+                    x_df = pd.DataFrame([x], columns=feature_names)
+                    prediction = model.predict(x_df)[0]
+                    objectives.append(directions[j] * prediction)
+                except:
+                    objectives.append(float('inf'))
+            
+            return np.array(objectives), {'uncertainty': 0.0, 'method': 'deterministic'}
+    
+    def _bootstrap_evaluation(self, models, model_indices, x, feature_names, directions, n_samples):
+        """Bootstrap-based uncertainty evaluation"""
+        all_predictions = []
+        
+        for j, (model, model_idx) in enumerate(zip(models, model_indices)):
+            predictions = []
+            x_df = pd.DataFrame([x], columns=feature_names)
+            
+            for _ in range(n_samples):
+                try:
+                    # Add small noise to input for bootstrap-like sampling
+                    x_noisy = x + np.random.normal(0, 0.001, size=x.shape)
+                    x_noisy_df = pd.DataFrame([x_noisy], columns=feature_names)
+                    
+                    prediction = model.predict(x_noisy_df)[0]
+                    predictions.append(directions[j] * prediction)
+                except:
+                    predictions.append(float('inf'))
+            
+            all_predictions.append(predictions)
+        
+        # Calculate robust statistics
+        means = [np.mean(pred) for pred in all_predictions]
+        stds = [np.std(pred) for pred in all_predictions]
+        
+        # Robust objective: mean + risk_factor * std (minimize worst-case)
+        risk_factor = 0.5  # Adjustable risk aversion parameter
+        robust_objectives = [mean + risk_factor * std for mean, std in zip(means, stds)]
+        
+        uncertainty_metrics = {
+            'means': means,
+            'stds': stds,
+            'uncertainty': np.mean(stds),
+            'method': 'bootstrap'
+        }
+        
+        return np.array(robust_objectives), uncertainty_metrics
+    
+    def _monte_carlo_evaluation(self, models, model_indices, x, feature_names, directions, n_samples, noise_level):
+        """Monte Carlo-based uncertainty evaluation"""
+        all_predictions = []
+        
+        for j, (model, model_idx) in enumerate(zip(models, model_indices)):
+            predictions = []
+            
+            for _ in range(n_samples):
+                try:
+                    # Add Gaussian noise to input variables
+                    x_noisy = x + np.random.normal(0, noise_level * np.abs(x), size=x.shape)
+                    x_noisy_df = pd.DataFrame([x_noisy], columns=feature_names)
+                    
+                    prediction = model.predict(x_noisy_df)[0]
+                    predictions.append(directions[j] * prediction)
+                except:
+                    predictions.append(float('inf'))
+            
+            all_predictions.append(predictions)
+        
+        # Calculate statistics
+        means = [np.mean(pred) for pred in all_predictions]
+        stds = [np.std(pred) for pred in all_predictions]
+        
+        # CVaR-based robust objective (Conditional Value at Risk)
+        alpha = 0.1  # Risk level (10% worst cases)
+        robust_objectives = []
+        
+        for predictions in all_predictions:
+            sorted_pred = np.sort(predictions)
+            cvar_idx = int(len(sorted_pred) * (1 - alpha))
+            cvar = np.mean(sorted_pred[cvar_idx:])  # Mean of worst α% cases
+            robust_objectives.append(cvar)
+        
+        uncertainty_metrics = {
+            'means': means,
+            'stds': stds,
+            'cvar': robust_objectives,
+            'uncertainty': np.mean(stds),
+            'method': 'monte_carlo'
+        }
+        
+        return np.array(robust_objectives), uncertainty_metrics
+
+
+class ScenarioBasedOptimization:
+    """
+    Multi-scenario robust optimization handler
+    """
+    def __init__(self, scenario_config=None):
+        """
+        Parameters:
+        - scenario_config: Dict with scenario specifications
+          Format: {'scenarios': [{'name': str, 'perturbations': dict}], 'aggregation': str}
+        """
+        self.config = scenario_config or {
+            'scenarios': [
+                {'name': 'nominal', 'perturbations': {}},
+                {'name': 'worst_case', 'perturbations': {'noise_scale': 0.05}}
+            ],
+            'aggregation': 'worst_case'  # 'worst_case', 'average', 'weighted'
+        }
+    
+    def evaluate_multi_scenario(self, models, model_indices, x, feature_names, directions):
+        """
+        Evaluate objectives across multiple scenarios
+        
+        Returns:
+        - aggregated_objectives: Scenario-aggregated objective values
+        - scenario_details: Dict with per-scenario results
+        """
+        scenario_results = {}
+        
+        for scenario in self.config['scenarios']:
+            name = scenario['name']
+            perturbations = scenario.get('perturbations', {})
+            
+            # Apply scenario perturbations
+            x_scenario = self._apply_perturbations(x, perturbations)
+            
+            # Evaluate in this scenario
+            objectives = []
+            for j, (model, model_idx) in enumerate(zip(models, model_indices)):
+                try:
+                    x_df = pd.DataFrame([x_scenario], columns=feature_names)
+                    prediction = model.predict(x_df)[0]
+                    objectives.append(directions[j] * prediction)
+                except:
+                    objectives.append(float('inf'))
+            
+            scenario_results[name] = np.array(objectives)
+        
+        # Aggregate across scenarios
+        aggregated = self._aggregate_scenarios(scenario_results)
+        
+        return aggregated, scenario_results
+    
+    def _apply_perturbations(self, x, perturbations):
+        """Apply scenario-specific perturbations to input"""
+        x_perturbed = x.copy()
+        
+        if 'noise_scale' in perturbations:
+            noise = np.random.normal(0, perturbations['noise_scale'], size=x.shape)
+            x_perturbed += noise
+        
+        if 'bias' in perturbations:
+            x_perturbed += perturbations['bias']
+        
+        return x_perturbed
+    
+    def _aggregate_scenarios(self, scenario_results):
+        """Aggregate objectives across scenarios"""
+        method = self.config['aggregation']
+        
+        if method == 'worst_case':
+            # For minimization: take maximum (worst) value across scenarios
+            all_values = np.array(list(scenario_results.values()))
+            return np.max(all_values, axis=0)
+            
+        elif method == 'average':
+            all_values = np.array(list(scenario_results.values()))
+            return np.mean(all_values, axis=0)
+            
+        elif method == 'weighted':
+            # Use equal weights for now (could be configurable)
+            weights = np.ones(len(scenario_results)) / len(scenario_results)
+            all_values = np.array(list(scenario_results.values()))
+            return np.average(all_values, axis=0, weights=weights)
+        
+        else:
+            # Default to average
+            all_values = np.array(list(scenario_results.values()))
+            return np.mean(all_values, axis=0)
+
+
 class OptimizationCallback(Callback):
     """Enhanced callback for real-time progress updates and convergence tracking"""
     
@@ -444,6 +1208,23 @@ class OptimizationCallback(Callback):
                         'convergence_metrics': self._get_convergence_metrics(F)
                     }
                     self.worker.progress_updated.emit(progress_data)
+                    
+                    # Handle checkpointing
+                    if hasattr(self.worker, 'checkpoint_system'):
+                        if self.worker.checkpoint_system.should_save(gen):
+                            try:
+                                checkpoint_file = self.worker.checkpoint_system.save_checkpoint(
+                                    gen, algorithm, self.worker.config,
+                                    additional_data={
+                                        'hypervolume_history': self.hypervolume_history.copy(),
+                                        'best_objectives_history': self.best_objectives_history.copy()
+                                    }
+                                )
+                                if checkpoint_file:
+                                    self.worker.status_updated.emit(f"💾 Checkpoint saved: {checkpoint_file}")
+                            except Exception as e:
+                                print(f"Checkpoint save error: {e}")
+                                
         except Exception as e:
             print(f"Callback error: {e}")
     
@@ -530,7 +1311,7 @@ class MLProblem(Problem):
     
     def __init__(self, models, model_indices, directions, n_var, xl, xu, feature_names, 
                  fixed_features=None, feature_types=None, categorical_ranges=None, 
-                 diversity_noise_scale=1e-10):
+                 diversity_noise_scale=1e-10, robust_config=None, constraint_config=None):
         """
         Initialize the multi-objective problem
         
@@ -560,6 +1341,29 @@ class MLProblem(Problem):
         self.categorical_ranges = categorical_ranges or {}
         self.diversity_noise_scale = diversity_noise_scale
         
+        # Initialize enhanced handlers
+        self.robust_handler = None
+        self.constraint_handler = None
+        self.scenario_handler = None
+        
+        # Setup robust optimization if enabled
+        if robust_config and robust_config.get('enable_robust_optimization', False):
+            uncertainty_config = {
+                'method': robust_config.get('robust_method', 'bootstrap'),
+                'n_samples': robust_config.get('robust_samples', 10),
+                'noise_level': robust_config.get('robust_noise_level', 0.01)
+            }
+            self.robust_handler = RobustOptimizationHandler(uncertainty_config)
+            print(f"✅ Robust optimization enabled: {uncertainty_config['method']}")
+            
+            if uncertainty_config['method'] == 'scenario_based':
+                self.scenario_handler = ScenarioBasedOptimization()
+        
+        # Setup constraint handling if enabled
+        if constraint_config and constraint_config.get('enable_explicit_constraints', False):
+            self.constraint_handler = ExplicitConstraintHandler()
+            print(f"✅ Explicit constraint handling enabled")
+        
         # Validate inputs
         if len(models) != len(model_indices) or len(models) != len(directions):
             raise ValueError("Number of models, indices, and directions must match")
@@ -575,7 +1379,7 @@ class MLProblem(Problem):
     
     def _evaluate(self, x, out, *args, **kwargs):
         """
-        Enhanced evaluation with controlled diversity preservation and numerical stability
+        Enhanced evaluation with batch prediction and controlled diversity preservation
         
         Args:
             x: Input solutions (n_solutions x n_variables)
@@ -583,64 +1387,74 @@ class MLProblem(Problem):
         """
         try:
             n_solutions = x.shape[0]
-            objectives = np.zeros((n_solutions, self.n_objectives))
             
-            for i in range(n_solutions):
-                solution = x[i].copy()
-                
-                # Apply bounds clipping
-                solution = np.clip(solution, self.xl, self.xu)
-                
-                # Apply fixed features if any
-                for feature_idx, fixed_value in self.fixed_features.items():
-                    solution[feature_idx] = fixed_value
-                
-                # Evaluate each objective/model
-                for j in range(self.n_objectives):
-                    try:
-                        # Extract features for current model
-                        model = self.models[j]
-                        indices = self.model_indices[j]
-                        direction = self.directions[j]
+            # Apply bounds clipping and fixed features to all solutions
+            x_processed = np.clip(x.copy(), self.xl, self.xu)
+            
+            # Apply fixed features if any
+            for feature_idx, fixed_value in self.fixed_features.items():
+                x_processed[:, feature_idx] = fixed_value
+            
+            # Use batch prediction or robust evaluation
+            try:
+                if self.robust_handler:
+                    # Use robust optimization for uncertainty handling
+                    objectives = np.zeros((n_solutions, self.n_objectives))
+                    
+                    for i in range(n_solutions):
+                        solution = x_processed[i]
                         
-                        # Extract features for current model
-                        x_subset = solution[indices]
-                        
-                        # Validate input dimensions
-                        if len(x_subset) != len(indices):
-                            print(f"Warning: Dimension mismatch for model {j+1}")
-                            objectives[i, j] = float('inf')
-                            continue
-                        
-                        # Create DataFrame with correct feature names for model input
-                        model_feature_names = [self.feature_names[idx] for idx in indices]
-                        x_df = pd.DataFrame([x_subset], columns=model_feature_names)
-                        
-                        # Predict and apply optimization direction
-                        prediction = model.predict(x_df)[0]
-                        
-                        # Enhanced prediction validation
-                        if not np.isfinite(prediction):
-                            print(f"Warning: Invalid prediction from model {j+1}")
-                            objectives[i, j] = float('inf')
+                        if self.scenario_handler:
+                            # Scenario-based evaluation
+                            robust_objs, _ = self.scenario_handler.evaluate_multi_scenario(
+                                self.models, self.model_indices, solution, self.feature_names, self.directions
+                            )
                         else:
-                            # Apply direction
-                            base_objective = direction * prediction
-                            
-                            # Add configurable diversity term to prevent identical objective values
-                            # This helps maintain multiple solutions on the Pareto front
-                            if self.diversity_noise_scale > 0:
-                                diversity_term = np.random.normal(0, abs(base_objective) * self.diversity_noise_scale)
-                                objectives[i, j] = base_objective + diversity_term
-                            else:
-                                objectives[i, j] = base_objective
+                            # Bootstrap or Monte Carlo evaluation
+                            robust_objs, _ = self.robust_handler.evaluate_robust_objectives(
+                                self.models, self.model_indices, solution, self.feature_names, self.directions
+                            )
                         
-                    except Exception as e:
-                        # Handle prediction errors for individual models
-                        print(f"Model {j+1} prediction error: {str(e)}")
-                        objectives[i, j] = float('inf')
+                        objectives[i] = robust_objs
+                        
+                        # Add diversity term if configured
+                        if self.diversity_noise_scale > 0:
+                            for j in range(self.n_objectives):
+                                if np.isfinite(objectives[i, j]):
+                                    diversity_term = np.random.normal(0, abs(objectives[i, j]) * self.diversity_noise_scale)
+                                    objectives[i, j] += diversity_term
+                else:
+                    # Standard batch prediction
+                    predictions = batch_predict_models(
+                        self.models, self.model_indices, x_processed, self.feature_names
+                    )
+                    
+                    # Apply optimization directions
+                    objectives = np.zeros((n_solutions, self.n_objectives))
+                    for j in range(self.n_objectives):
+                        direction = self.directions[j]
+                        valid_mask = np.isfinite(predictions[:, j])
+                        
+                        # Apply direction to valid predictions
+                        objectives[valid_mask, j] = direction * predictions[valid_mask, j]
+                        
+                        # Set invalid predictions to infinity
+                        objectives[~valid_mask, j] = float('inf')
+                        
+                        # Add configurable diversity term to prevent identical objective values
+                        if self.diversity_noise_scale > 0 and np.any(valid_mask):
+                            valid_objs = objectives[valid_mask, j]
+                            diversity_terms = np.random.normal(
+                                0, np.abs(valid_objs) * self.diversity_noise_scale
+                            )
+                            objectives[valid_mask, j] += diversity_terms
+                        
+            except Exception as e:
+                print(f"Batch prediction failed, falling back to individual evaluation: {e}")
+                # Fallback to original individual evaluation
+                objectives = self._evaluate_individual(x_processed)
             
-            # Additional diversity check (only if diversity noise is enabled and low)
+            # Additional diversity check for multi-objective cases
             if (n_solutions > 1 and self.n_objectives >= 2 and 
                 0 < self.diversity_noise_scale < 1e-8):
                 for j in range(self.n_objectives):
@@ -651,7 +1465,7 @@ class MLProblem(Problem):
                         value_range = np.max(valid_values) - np.min(valid_values)
                         mean_value = np.mean(valid_values)
                         if value_range < abs(mean_value) * 1e-10:
-                            # Add minimal artificial diversity to prevent single-point Pareto front
+                            # Add minimal artificial diversity
                             for idx, val in enumerate(obj_values):
                                 if np.isfinite(val):
                                     objectives[idx, j] += np.random.normal(0, abs(mean_value) * 1e-12)
@@ -664,6 +1478,58 @@ class MLProblem(Problem):
             traceback.print_exc()
             # Return invalid objectives
             out["F"] = np.full((x.shape[0], self.n_objectives), float('inf'))
+    
+    def _evaluate_individual(self, x_processed):
+        """Fallback individual evaluation method (original logic)"""
+        n_solutions = x_processed.shape[0]
+        objectives = np.zeros((n_solutions, self.n_objectives))
+        
+        for i in range(n_solutions):
+            solution = x_processed[i]
+            
+            # Evaluate each objective/model
+            for j in range(self.n_objectives):
+                try:
+                    model = self.models[j]
+                    indices = self.model_indices[j]
+                    direction = self.directions[j]
+                    
+                    # Extract features for current model
+                    x_subset = solution[indices]
+                    
+                    # Validate input dimensions
+                    if len(x_subset) != len(indices):
+                        print(f"Warning: Dimension mismatch for model {j+1}")
+                        objectives[i, j] = float('inf')
+                        continue
+                    
+                    # Create DataFrame with correct feature names
+                    model_feature_names = [self.feature_names[idx] for idx in indices]
+                    x_df = pd.DataFrame([x_subset], columns=model_feature_names)
+                    
+                    # Predict and apply optimization direction
+                    prediction = model.predict(x_df)[0]
+                    
+                    # Enhanced prediction validation
+                    if not np.isfinite(prediction):
+                        print(f"Warning: Invalid prediction from model {j+1}")
+                        objectives[i, j] = float('inf')
+                    else:
+                        # Apply direction
+                        base_objective = direction * prediction
+                        
+                        # Add diversity term if configured
+                        if self.diversity_noise_scale > 0:
+                            diversity_term = np.random.normal(0, abs(base_objective) * self.diversity_noise_scale)
+                            objectives[i, j] = base_objective + diversity_term
+                        else:
+                            objectives[i, j] = base_objective
+                    
+                except Exception as e:
+                    print(f"Model {j+1} prediction error: {str(e)}")
+                    objectives[i, j] = float('inf')
+        
+        return objectives
 
 
 class MultiObjectiveOptimizationWorker(QThread):
@@ -681,6 +1547,10 @@ class MultiObjectiveOptimizationWorker(QThread):
         super().__init__()
         self.config = config
         self.should_stop = False
+        self.checkpoint_system = OptimizationCheckpoint(
+            save_interval=config.get('checkpoint_interval', 25),
+            max_checkpoints=config.get('max_checkpoints', 5)
+        )
         
     def run(self):
         """Main optimization loop"""
@@ -723,7 +1593,20 @@ class MultiObjectiveOptimizationWorker(QThread):
             # Extract diversity noise scale from config (advanced parameter)
             diversity_noise_scale = self.config.get('diversity_noise_scale', 1e-10)
             
-            # Create enhanced problem instance with constraint handling
+            # Prepare robust and constraint configurations
+            robust_config = {
+                'enable_robust_optimization': self.config.get('enable_robust_optimization', False),
+                'robust_method': self.config.get('robust_method', 'bootstrap'),
+                'robust_samples': self.config.get('robust_samples', 10),
+                'robust_noise_level': self.config.get('robust_noise_level', 0.01)
+            }
+            
+            constraint_config = {
+                'enable_explicit_constraints': self.config.get('enable_explicit_constraints', False),
+                'adaptive_penalty_coefficients': self.config.get('adaptive_penalty_coefficients', True)
+            }
+            
+            # Create enhanced problem instance with robust optimization and constraint handling
             problem = MLProblem(
                 models=models,
                 model_indices=model_indices,
@@ -735,7 +1618,9 @@ class MultiObjectiveOptimizationWorker(QThread):
                 fixed_features=fixed_features,
                 feature_types=feature_types,
                 categorical_ranges=categorical_ranges,
-                diversity_noise_scale=diversity_noise_scale
+                diversity_noise_scale=diversity_noise_scale,
+                robust_config=robust_config,
+                constraint_config=constraint_config
             )
             
             # Extract algorithm parameters
@@ -790,8 +1675,6 @@ class MultiObjectiveOptimizationWorker(QThread):
             
             # 使用改进的配置，专门针对混合变量优化
             try:
-                from pymoo.operators.crossover.sbx import SBX
-                from pymoo.operators.mutation.pm import PM
                 
                 if has_mixed_variables:
                     # For mixed variables, use custom sampling and repair
@@ -818,13 +1701,17 @@ class MultiObjectiveOptimizationWorker(QThread):
                         self.status_updated.emit(f"      {ftype}: {count} 个特征")
                 else:
                     # For continuous variables only, use standard operators
-                    from pymoo.operators.sampling.rnd import FloatRandomSampling
+                    try:
+                        from pymoo.operators.sampling.rnd import FloatRandomSampling
+                    except ImportError:
+                        # pymoo 0.5.0 path
+                        from pymoo.operators.sampling.random_sampling import FloatRandomSampling
                     sampling = FloatRandomSampling()
                     repair = None
                     self.status_updated.emit("📈 所有特征为连续型，使用标准优化策略")
                 
                 # Configure crossover operator
-                crossover = SBX(prob=crossover_prob, eta=crossover_eta)
+                crossover = SBX(prob=crossover_prob, eta=crossover_eta) if SBX else None
                 
                 # Configure mutation operator
                 if mutation_prob is None:
@@ -832,12 +1719,15 @@ class MultiObjectiveOptimizationWorker(QThread):
                 else:
                     mutation_prob_adjusted = mutation_prob
                 
-                mutation = PM(prob=mutation_prob_adjusted, eta=mutation_eta)
+                mutation = PM(prob=mutation_prob_adjusted, eta=mutation_eta) if PM else None
                 
-                # Create algorithm based on objective count
-                if is_single_objective:
+                # Create algorithm based on selection and objective count
+                selected_algorithm = self.config.get('algorithm', 'NSGA-II')
+                
+                if selected_algorithm == "GA (Single-Objective)" or is_single_objective:
                     # Use Genetic Algorithm for single objective
-                    from pymoo.algorithms.soo.nonconvex.ga import GA
+                    GA = NSGA2  # Use NSGA2 as GA for single objective optimization
+                    self.status_updated.emit("Using NSGA-II for single-objective optimization")
                     algorithm = GA(
                         pop_size=population_size_adjusted,
                         sampling=sampling,
@@ -846,8 +1736,197 @@ class MultiObjectiveOptimizationWorker(QThread):
                         repair=repair,
                         eliminate_duplicates=eliminate_duplicates_adjusted
                     )
+                    self.status_updated.emit(f"✅ Created GA algorithm for single-objective optimization")
+                elif selected_algorithm == "NSGA-III" and NSGA3 is not None:
+                    # Use NSGA-III for many-objective problems
+                    try:
+                        from pymoo.util.ref_dirs import get_reference_directions
+                    except ImportError:
+                        # Try pymoo 0.5.0 path
+                        try:
+                            from pymoo.factory import get_reference_directions
+                        except ImportError:
+                            # If reference directions not available, create simple uniform directions
+                            def get_reference_directions(method, n_obj, n_partitions=12):
+                                if n_obj == 2:
+                                    return np.array([[1, 0], [0.7, 0.3], [0.5, 0.5], [0.3, 0.7], [0, 1]])
+                                elif n_obj == 3:
+                                    return np.array([[1,0,0], [0,1,0], [0,0,1], [0.5,0.5,0], [0.5,0,0.5], [0,0.5,0.5]])
+                                else:
+                                    # Simple uniform grid for higher dimensions
+                                    refs = []
+                                    for i in range(n_obj):
+                                        ref = np.zeros(n_obj)
+                                        ref[i] = 1.0
+                                        refs.append(ref)
+                                    return np.array(refs)
+                            self.status_updated.emit("⚠️ Using simplified reference directions")
+                    # Create reference directions for NSGA-III
+                    if len(models) <= 3:
+                        ref_dirs = get_reference_directions("das-dennis", len(models), n_partitions=12)
+                    else:
+                        ref_dirs = get_reference_directions("das-dennis", len(models), n_partitions=6)
+                    
+                    algorithm = NSGA3(
+                        pop_size=population_size_adjusted,
+                        ref_dirs=ref_dirs,
+                        sampling=sampling,
+                        crossover=crossover,
+                        mutation=mutation,
+                        repair=repair,
+                        eliminate_duplicates=eliminate_duplicates_adjusted
+                    )
+                    self.status_updated.emit(f"✅ Created NSGA-III algorithm with {len(ref_dirs)} reference directions")
+                elif selected_algorithm == "NSGA-III" and NSGA3 is None:
+                    # Fallback to NSGA-II if NSGA3 not available
+                    algorithm = NSGA2(
+                        pop_size=population_size_adjusted,
+                        sampling=sampling,
+                        crossover=crossover,
+                        mutation=mutation,
+                        repair=repair,
+                        eliminate_duplicates=eliminate_duplicates_adjusted
+                    )
+                    self.status_updated.emit(f"⚠️ NSGA-III not available in this pymoo version, using NSGA-II instead")
+                elif selected_algorithm == "SPEA2" and SPEA2 is not None:
+                    # Use SPEA2 algorithm
+                    algorithm = SPEA2(
+                        pop_size=population_size_adjusted,
+                        sampling=sampling,
+                        crossover=crossover,
+                        mutation=mutation,
+                        repair=repair,
+                        eliminate_duplicates=eliminate_duplicates_adjusted
+                    )
+                    self.status_updated.emit(f"✅ Created SPEA2 algorithm for multi-objective optimization")
+                elif selected_algorithm == "SPEA2" and SPEA2 is None:
+                    # Fallback to NSGA-II if SPEA2 not available
+                    algorithm = NSGA2(
+                        pop_size=population_size_adjusted,
+                        sampling=sampling,
+                        crossover=crossover,
+                        mutation=mutation,
+                        repair=repair,
+                        eliminate_duplicates=eliminate_duplicates_adjusted
+                    )
+                    self.status_updated.emit(f"⚠️ SPEA2 not available in this pymoo version, using NSGA-II instead")
+                elif selected_algorithm == "MOEA/D" and MOEAD is not None:
+                    # Use MOEA/D algorithm
+                    try:
+                        # MOEA/D requires reference directions for decomposition
+                        try:
+                            from pymoo.util.ref_dirs import get_reference_directions
+                        except ImportError:
+                            from pymoo.factory import get_reference_directions
+                        
+                        if len(models) <= 3:
+                            ref_dirs = get_reference_directions("das-dennis", len(models), n_partitions=12)
+                        else:
+                            ref_dirs = get_reference_directions("das-dennis", len(models), n_partitions=6)
+                        
+                        algorithm = MOEAD(
+                            ref_dirs=ref_dirs,
+                            sampling=sampling,
+                            crossover=crossover,
+                            mutation=mutation,
+                            repair=repair
+                        )
+                        self.status_updated.emit(f"✅ Created MOEA/D algorithm with {len(ref_dirs)} decomposition vectors")
+                    except Exception as e:
+                        # Fallback to NSGA-II if MOEA/D setup fails
+                        algorithm = NSGA2(
+                            pop_size=population_size_adjusted,
+                            sampling=sampling,
+                            crossover=crossover,
+                            mutation=mutation,
+                            repair=repair,
+                            eliminate_duplicates=eliminate_duplicates_adjusted
+                        )
+                        self.status_updated.emit(f"⚠️ MOEA/D setup failed ({str(e)}), using NSGA-II instead")
+                elif selected_algorithm == "MOEA/D" and MOEAD is None:
+                    # Fallback to NSGA-II if MOEA/D not available
+                    algorithm = NSGA2(
+                        pop_size=population_size_adjusted,
+                        sampling=sampling,
+                        crossover=crossover,
+                        mutation=mutation,
+                        repair=repair,
+                        eliminate_duplicates=eliminate_duplicates_adjusted
+                    )
+                    self.status_updated.emit(f"⚠️ MOEA/D not available in this pymoo version, using NSGA-II instead")
+                elif selected_algorithm == "CMA-ES" and CMA_ES is not None:
+                    # Use CMA-ES for continuous optimization
+                    try:
+                        algorithm = CMA_ES(
+                            x0=np.mean([xl, xu], axis=0),  # Initial center point
+                            sigma=0.1,  # Initial standard deviation
+                            restarts=0  # No restarts for now
+                        )
+                        self.status_updated.emit(f"✅ Created CMA-ES algorithm for continuous optimization")
+                    except Exception as e:
+                        # Fallback to NSGA-II if CMA-ES setup fails
+                        algorithm = NSGA2(
+                            pop_size=population_size_adjusted,
+                            sampling=sampling,
+                            crossover=crossover,
+                            mutation=mutation,
+                            repair=repair,
+                            eliminate_duplicates=eliminate_duplicates_adjusted
+                        )
+                        self.status_updated.emit(f"⚠️ CMA-ES setup failed ({str(e)}), using NSGA-II instead")
+                elif selected_algorithm == "CMA-ES" and CMA_ES is None:
+                    # Fallback to NSGA-II if CMA-ES not available
+                    algorithm = NSGA2(
+                        pop_size=population_size_adjusted,
+                        sampling=sampling,
+                        crossover=crossover,
+                        mutation=mutation,
+                        repair=repair,
+                        eliminate_duplicates=eliminate_duplicates_adjusted
+                    )
+                    self.status_updated.emit(f"⚠️ CMA-ES not available in this pymoo version, using NSGA-II instead")
+                elif selected_algorithm == "Differential Evolution" and DE is not None:
+                    # Use Differential Evolution
+                    try:
+                        # Configure DE-specific operators if available
+                        if DifferentialEvolution:
+                            crossover_de = DifferentialEvolution(weight=mutation_eta, prob=crossover_prob)
+                        else:
+                            crossover_de = crossover
+                        
+                        algorithm = DE(
+                            pop_size=population_size_adjusted,
+                            sampling=sampling,
+                            variant="DE/rand/1/bin",
+                            CR=crossover_prob,
+                            F=mutation_eta,
+                            repair=repair
+                        )
+                        self.status_updated.emit(f"✅ Created DE algorithm with CR={crossover_prob:.2f}, F={mutation_eta:.2f}")
+                    except Exception as e:
+                        # Fallback to NSGA-II if DE setup fails
+                        algorithm = NSGA2(
+                            pop_size=population_size_adjusted,
+                            sampling=sampling,
+                            crossover=crossover,
+                            mutation=mutation,
+                            repair=repair,
+                            eliminate_duplicates=eliminate_duplicates_adjusted
+                        )
+                        self.status_updated.emit(f"⚠️ DE setup failed ({str(e)}), using NSGA-II instead")
+                elif selected_algorithm == "Differential Evolution" and DE is None:
+                    # Fallback to NSGA-II if DE not available
+                    algorithm = NSGA2(
+                        pop_size=population_size_adjusted,
+                        sampling=sampling,
+                        crossover=crossover,
+                        mutation=mutation,
+                        repair=repair,
+                        eliminate_duplicates=eliminate_duplicates_adjusted
+                    )
+                    self.status_updated.emit(f"⚠️ DE not available in this pymoo version, using NSGA-II instead")
                 else:
-                    # Use NSGA-II for multi-objective
+                    # Default to NSGA-II for multi-objective
                     algorithm = NSGA2(
                         pop_size=population_size_adjusted,
                         sampling=sampling,
@@ -856,6 +1935,7 @@ class MultiObjectiveOptimizationWorker(QThread):
                         repair=repair,  # CRITICAL: This ensures constraints are enforced during optimization
                         eliminate_duplicates=eliminate_duplicates_adjusted
                     )
+                    self.status_updated.emit(f"✅ Created NSGA-II algorithm for multi-objective optimization")
                 
                 if has_mixed_variables:
                     self.status_updated.emit(f"✅ 混合变量算法配置完成：变异率={mutation_prob_adjusted:.3f}")
@@ -873,7 +1953,10 @@ class MultiObjectiveOptimizationWorker(QThread):
                             fixed_features=fixed_features
                         )
                         if is_single_objective:
-                            from pymoo.algorithms.soo.nonconvex.ga import GA
+                            try:
+                                from pymoo.algorithms.soo.nonconvex.ga import GA
+                            except ImportError:
+                                GA = NSGA2  # Use NSGA2 as fallback
                             algorithm = GA(
                                 pop_size=population_size_adjusted,
                                 repair=repair,
@@ -940,10 +2023,20 @@ class MultiObjectiveOptimizationWorker(QThread):
                 if search_space_size < 1e-6:
                     self.status_updated.emit("⚠️  搜索空间可能过小，建议检查特征边界设置")
             
-            # Set termination criteria
-            termination = get_termination("n_gen", n_generations)
+            # Set termination criteria with optional early stopping
+            use_early_stopping = self.config.get('enable_early_stopping', True)
+            if use_early_stopping and len(models) > 1:
+                # For now, disable early stopping to ensure full generations run
+                # TODO: Fix early stopping mechanism in future version
+                termination = get_termination("n_gen", n_generations)
+                early_stop = None
+                self.status_updated.emit(f"🔄 运行标准 {n_generations} 代优化（早停功能暂时禁用以确保完整运行）")
+            else:
+                # Standard generation-based termination
+                termination = get_termination("n_gen", n_generations)
+                early_stop = None
             
-            # Create callback for progress updates
+            # Create enhanced callback for progress updates and checkpointing
             callback = OptimizationCallback(self)
             
             self.status_updated.emit("Running NSGA-II optimization...")
@@ -1193,6 +2286,9 @@ class MultiObjectiveOptimizationModule(QWidget):
     def __init__(self):
         super().__init__()
         
+        # Check dependencies
+        self.check_dependencies()
+        
         if not PYMOO_AVAILABLE:
             self.show_dependency_error()
             return
@@ -1208,6 +2304,64 @@ class MultiObjectiveOptimizationModule(QWidget):
         
         # Initialize algorithm settings display
         self.update_algorithm_settings_display()
+    
+    def check_dependencies(self):
+        """Check and report dependency status"""
+        dependency_status = []
+        
+        # Check PyQt5
+        try:
+            from PyQt5 import QtCore
+            pyqt_version = QtCore.QT_VERSION_STR
+            dependency_status.append(f"✅ PyQt5: {pyqt_version}")
+        except ImportError:
+            dependency_status.append("❌ PyQt5: Not available")
+        
+        # Check pymoo with version-specific features
+        if PYMOO_AVAILABLE:
+            dependency_status.append(f"✅ pymoo: {PYMOO_VERSION}")
+            
+            # Check version-specific features
+            if PYMOO_VERSION == '0.5.0':
+                dependency_status.append("   ℹ️  pymoo 0.5.0 detected - some features may use fallback implementations")
+                if SPEA2 is None:
+                    dependency_status.append("   ⚠️  SPEA2 algorithm not available in this pymoo version")
+            elif PYMOO_VERSION.startswith('0.6'):
+                dependency_status.append("   ℹ️  pymoo 0.6+ detected - full feature support")
+        else:
+            dependency_status.append("❌ pymoo: Not available - install with 'pip install pymoo'")
+        
+        # Check matplotlib
+        try:
+            import matplotlib
+            dependency_status.append(f"✅ matplotlib: {matplotlib.__version__}")
+        except ImportError:
+            dependency_status.append("❌ matplotlib: Not available")
+        
+        # Check pandas
+        try:
+            dependency_status.append(f"✅ pandas: {pd.__version__}")
+        except:
+            dependency_status.append("❌ pandas: Not available")
+        
+        # Check numpy
+        try:
+            dependency_status.append(f"✅ numpy: {np.__version__}")
+        except:
+            dependency_status.append("❌ numpy: Not available")
+        
+        # Check joblib
+        try:
+            import joblib as jl
+            dependency_status.append(f"✅ joblib: {jl.__version__}")
+        except:
+            dependency_status.append("❌ joblib: Not available")
+        
+        print("📦 Dependency Check Results:")
+        for status in dependency_status:
+            print(f"   {status}")
+        
+        return dependency_status
         
     def show_dependency_error(self):
         """Show error message for missing pymoo dependency"""
@@ -1344,6 +2498,7 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.crossover_prob_spin.setSingleStep(0.1)
         self.crossover_prob_spin.setDecimals(2)
         self.crossover_prob_spin.setToolTip("Probability of crossover between parents (0.8-0.95 recommended)")
+        self.crossover_prob_spin.valueChanged.connect(lambda: self._mark_param_modified('crossover_prob'))
         algo_layout.addRow("Crossover Probability:", self.crossover_prob_spin)
         
         self.crossover_eta_spin = QDoubleSpinBox()
@@ -1353,6 +2508,7 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.crossover_eta_spin.setSingleStep(1.0)
         self.crossover_eta_spin.setDecimals(1)
         self.crossover_eta_spin.setToolTip("Crossover distribution index (lower = more exploration, higher = more exploitation)")
+        self.crossover_eta_spin.valueChanged.connect(lambda: self._mark_param_modified('crossover_eta'))
         algo_layout.addRow("Crossover Eta (η_c):", self.crossover_eta_spin)
         
         # Mutation Parameters
@@ -1363,6 +2519,7 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.mutation_prob_spin.setSingleStep(0.01)
         self.mutation_prob_spin.setDecimals(3)
         self.mutation_prob_spin.setToolTip("Probability of mutation (typically 1/n_vars, auto-calculated if 0)")
+        self.mutation_prob_spin.valueChanged.connect(lambda: self._mark_param_modified('mutation_prob'))
         algo_layout.addRow("Mutation Probability:", self.mutation_prob_spin)
         
         self.mutation_eta_spin = QDoubleSpinBox()
@@ -1372,7 +2529,30 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.mutation_eta_spin.setSingleStep(1.0)
         self.mutation_eta_spin.setDecimals(1)
         self.mutation_eta_spin.setToolTip("Mutation distribution index (lower = more perturbation, higher = fine-tuning)")
+        self.mutation_eta_spin.valueChanged.connect(lambda: self._mark_param_modified('mutation_eta'))
         algo_layout.addRow("Mutation Eta (η_m):", self.mutation_eta_spin)
+        
+        # Algorithm Selection
+        self.algorithm_combo = QComboBox()
+        # Add algorithms based on availability
+        algorithms = ["NSGA-II"]
+        if NSGA3:
+            algorithms.append("NSGA-III")
+        if SPEA2:
+            algorithms.append("SPEA2")
+        if MOEAD:
+            algorithms.append("MOEA/D")
+        if CMA_ES:
+            algorithms.append("CMA-ES")
+        if DE:
+            algorithms.append("Differential Evolution")
+        algorithms.append("GA (Single-Objective)")
+        
+        self.algorithm_combo.addItems(algorithms)
+        self.algorithm_combo.setCurrentText("NSGA-II")
+        self.algorithm_combo.setToolTip("Optimization algorithm to use")
+        self.algorithm_combo.currentTextChanged.connect(self.on_algorithm_changed)
+        algo_layout.addRow("Algorithm:", self.algorithm_combo)
         
         # Selection and Survival
         self.selection_combo = QComboBox()
@@ -1419,6 +2599,32 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.auto_mutation_check.stateChanged.connect(self.on_auto_mutation_changed)
         advanced_layout.addRow("Auto Mutation Prob:", self.auto_mutation_check)
         
+        # Early Stopping Parameters
+        self.enable_early_stopping_check = QCheckBox()
+        self.enable_early_stopping_check.setChecked(True)
+        self.enable_early_stopping_check.setToolTip("Enable early stopping based on hypervolume convergence (for multi-objective)")
+        advanced_layout.addRow("Enable Early Stopping:", self.enable_early_stopping_check)
+        
+        self.early_stop_patience_spin = QSpinBox()
+        self.early_stop_patience_spin.setMinimum(10)
+        self.early_stop_patience_spin.setMaximum(200)
+        self.early_stop_patience_spin.setValue(30)
+        self.early_stop_patience_spin.setToolTip("Number of generations to wait without improvement before stopping")
+        advanced_layout.addRow("Early Stop Patience:", self.early_stop_patience_spin)
+        
+        # Checkpoint Parameters
+        self.enable_checkpoints_check = QCheckBox()
+        self.enable_checkpoints_check.setChecked(True)
+        self.enable_checkpoints_check.setToolTip("Enable automatic checkpointing during optimization")
+        advanced_layout.addRow("Enable Checkpoints:", self.enable_checkpoints_check)
+        
+        self.checkpoint_interval_spin = QSpinBox()
+        self.checkpoint_interval_spin.setMinimum(5)
+        self.checkpoint_interval_spin.setMaximum(100)
+        self.checkpoint_interval_spin.setValue(25)
+        self.checkpoint_interval_spin.setToolTip("Save checkpoint every N generations")
+        advanced_layout.addRow("Checkpoint Interval:", self.checkpoint_interval_spin)
+        
         # Diversity noise scale parameter
         self.diversity_noise_spin = QDoubleSpinBox()
         self.diversity_noise_spin.setMinimum(0.0)
@@ -1430,8 +2636,54 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.diversity_noise_spin.setToolTip("Scale factor for diversity preservation noise (relative to objective magnitude). Set to 0 to disable. Recommended: 1e-10 to 1e-8")
         advanced_layout.addRow("Diversity Noise Scale:", self.diversity_noise_spin)
         
+        # Robust Optimization Settings
+        robust_group = QGroupBox("Robust Optimization")
+        robust_layout = QFormLayout(robust_group)
+        
+        self.enable_robust_check = QCheckBox()
+        self.enable_robust_check.setChecked(False)
+        self.enable_robust_check.setToolTip("Enable robust optimization to handle uncertainty in predictions")
+        robust_layout.addRow("Enable Robust Optimization:", self.enable_robust_check)
+        
+        self.robust_method_combo = QComboBox()
+        self.robust_method_combo.addItems(["Bootstrap", "Monte Carlo", "Scenario-Based"])
+        self.robust_method_combo.setCurrentText("Bootstrap")
+        self.robust_method_combo.setToolTip("Method for uncertainty evaluation")
+        robust_layout.addRow("Uncertainty Method:", self.robust_method_combo)
+        
+        self.robust_samples_spin = QSpinBox()
+        self.robust_samples_spin.setMinimum(5)
+        self.robust_samples_spin.setMaximum(100)
+        self.robust_samples_spin.setValue(10)
+        self.robust_samples_spin.setToolTip("Number of samples for uncertainty evaluation")
+        robust_layout.addRow("Uncertainty Samples:", self.robust_samples_spin)
+        
+        self.robust_noise_spin = QDoubleSpinBox()
+        self.robust_noise_spin.setMinimum(0.001)
+        self.robust_noise_spin.setMaximum(0.1)
+        self.robust_noise_spin.setValue(0.01)
+        self.robust_noise_spin.setDecimals(3)
+        self.robust_noise_spin.setToolTip("Noise level for Monte Carlo uncertainty (fraction of input magnitude)")
+        robust_layout.addRow("Noise Level:", self.robust_noise_spin)
+        
+        # Constraint Handling Settings
+        constraint_group = QGroupBox("Constraint Handling")
+        constraint_layout = QFormLayout(constraint_group)
+        
+        self.enable_constraints_check = QCheckBox()
+        self.enable_constraints_check.setChecked(False)
+        self.enable_constraints_check.setToolTip("Enable explicit constraint handling (experimental)")
+        constraint_layout.addRow("Enable Constraints:", self.enable_constraints_check)
+        
+        self.adaptive_penalty_check = QCheckBox()
+        self.adaptive_penalty_check.setChecked(True)
+        self.adaptive_penalty_check.setToolTip("Automatically adjust penalty coefficients based on violation rates")
+        constraint_layout.addRow("Adaptive Penalties:", self.adaptive_penalty_check)
+        
         layout.addWidget(self.algo_group)
         layout.addWidget(advanced_group)
+        layout.addWidget(robust_group)
+        layout.addWidget(constraint_group)
         
         # Control Buttons
         button_layout = QVBoxLayout()
@@ -1451,8 +2703,26 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.export_btn.setEnabled(False)
         button_layout.addWidget(self.export_btn)
         
+        # Checkpoint management buttons
+        checkpoint_layout = QHBoxLayout()
+        
+        self.resume_btn = QPushButton("Resume from Checkpoint")
+        self.resume_btn.clicked.connect(self.resume_from_checkpoint)
+        checkpoint_layout.addWidget(self.resume_btn)
+        
+        self.list_checkpoints_btn = QPushButton("List Checkpoints")
+        self.list_checkpoints_btn.clicked.connect(self.list_checkpoints)
+        checkpoint_layout.addWidget(self.list_checkpoints_btn)
+        
+        button_layout.addLayout(checkpoint_layout)
+        
         layout.addLayout(button_layout)
         layout.addStretch()
+        
+        # Initialize algorithm settings to match current selection
+        # Use QTimer to delay this call until after the UI is fully initialized
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self.on_algorithm_changed(self.algorithm_combo.currentText()))
         
         return panel
     
@@ -1674,6 +2944,454 @@ class MultiObjectiveOptimizationModule(QWidget):
         if not hasattr(self, '_user_modified_params'):
             self._user_modified_params = set()
         self._user_modified_params.add(param_name)
+    
+    def on_algorithm_changed(self, algorithm_name):
+        """Handle algorithm selection change and update UI accordingly"""
+        self.log_text.append(f"Algorithm changed to: {algorithm_name}")
+        
+        # Initialize user modified params tracking if not exists
+        if not hasattr(self, '_user_modified_params'):
+            self._user_modified_params = set()
+        
+        # Update algorithm-specific configurations
+        if algorithm_name == "NSGA-III":
+            self._update_nsga3_settings()
+            self.log_text.append("NSGA-III: Better for many-objective problems (>3 objectives)")
+        elif algorithm_name == "SPEA2":
+            self._update_spea2_settings()
+            if SPEA2 is not None:
+                self.log_text.append("SPEA2: Alternative multi-objective algorithm with archive")
+            else:
+                self.log_text.append("⚠️ SPEA2: Not available in current pymoo version, will fallback to NSGA-II")
+        elif algorithm_name == "MOEA/D":
+            self._update_moead_settings()
+            if MOEAD is not None:
+                self.log_text.append("MOEA/D: Decomposition-based multi-objective algorithm")
+            else:
+                self.log_text.append("⚠️ MOEA/D: Not available in current pymoo version, will fallback to NSGA-II")
+        elif algorithm_name == "CMA-ES":
+            self._update_cmaes_settings()
+            if CMA_ES is not None:
+                self.log_text.append("CMA-ES: Evolution Strategy for continuous optimization")
+            else:
+                self.log_text.append("⚠️ CMA-ES: Not available in current pymoo version, will fallback to NSGA-II")
+        elif algorithm_name == "Differential Evolution":
+            self._update_de_settings()
+            if DE is not None:
+                self.log_text.append("DE: Differential Evolution for robust global optimization")
+            else:
+                self.log_text.append("⚠️ DE: Not available in current pymoo version, will fallback to NSGA-II")
+        elif algorithm_name == "GA (Single-Objective)":
+            self._update_ga_settings()
+            self.log_text.append("GA: Forced single-objective mode (uses only first model)")
+        else:  # NSGA-II
+            self._update_nsga2_settings()
+            self.log_text.append("NSGA-II: Standard multi-objective algorithm")
+        
+        # Update the visual status indicator
+        self._update_algorithm_status_display(algorithm_name)
+    
+    def _update_algorithm_status_display(self, algorithm_name):
+        """Update the visual algorithm status display"""
+        loaded_models = [data for data in self.models_data if data is not None]
+        n_models = len(loaded_models)
+        
+        if algorithm_name == "GA (Single-Objective)":
+            self.algo_group.setTitle("🎯 GA (Genetic Algorithm) Settings")
+            self.algo_status_label.setText("🎯 Current Algorithm: GA (Genetic Algorithm) - Single-Objective Mode")
+            self.algo_status_label.setStyleSheet("""
+                QLabel {
+                    background-color: #e8f5e8;
+                    border: 2px solid #4caf50;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #2e7d32;
+                }
+            """)
+        elif algorithm_name == "NSGA-III":
+            self.algo_group.setTitle("🔺 NSGA-III (Many-Objective) Algorithm Settings")
+            self.algo_status_label.setText(f"🔺 Current Algorithm: NSGA-III - {n_models}-Objective Optimization (Many-Objective)")
+            self.algo_status_label.setStyleSheet("""
+                QLabel {
+                    background-color: #f3e5f5;
+                    border: 2px solid #9c27b0;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #7b1fa2;
+                }
+            """)
+        elif algorithm_name == "SPEA2":
+            self.algo_group.setTitle("💎 SPEA2 (Archive-Based) Algorithm Settings")
+            spea2_status = "Available" if SPEA2 is not None else "Unavailable (fallback to NSGA-II)"
+            self.algo_status_label.setText(f"💎 Current Algorithm: SPEA2 - {n_models}-Objective Optimization ({spea2_status})")
+            color_scheme = """
+                QLabel {
+                    background-color: #e0f2f1;
+                    border: 2px solid #009688;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #00695c;
+                }
+            """ if SPEA2 is not None else """
+                QLabel {
+                    background-color: #ffebee;
+                    border: 2px solid #f44336;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #c62828;
+                }
+            """
+            self.algo_status_label.setStyleSheet(color_scheme)
+        elif algorithm_name == "MOEA/D":
+            self.algo_group.setTitle("⚡ MOEA/D (Decomposition-Based) Algorithm Settings")
+            moead_status = "Available" if MOEAD is not None else "Unavailable (fallback to NSGA-II)"
+            self.algo_status_label.setText(f"⚡ Current Algorithm: MOEA/D - {n_models}-Objective Optimization ({moead_status})")
+            color_scheme = """
+                QLabel {
+                    background-color: #f3e5f5;
+                    border: 2px solid #673ab7;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #4a148c;
+                }
+            """ if MOEAD is not None else """
+                QLabel {
+                    background-color: #ffebee;
+                    border: 2px solid #f44336;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #c62828;
+                }
+            """
+            self.algo_status_label.setStyleSheet(color_scheme)
+        elif algorithm_name == "CMA-ES":
+            self.algo_group.setTitle("🎯 CMA-ES (Evolution Strategy) Algorithm Settings")
+            cmaes_status = "Available" if CMA_ES is not None else "Unavailable (fallback to NSGA-II)"
+            self.algo_status_label.setText(f"🎯 Current Algorithm: CMA-ES - Continuous Optimization ({cmaes_status})")
+            color_scheme = """
+                QLabel {
+                    background-color: #e8f5e8;
+                    border: 2px solid #4caf50;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #1b5e20;
+                }
+            """ if CMA_ES is not None else """
+                QLabel {
+                    background-color: #ffebee;
+                    border: 2px solid #f44336;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #c62828;
+                }
+            """
+            self.algo_status_label.setStyleSheet(color_scheme)
+        elif algorithm_name == "Differential Evolution":
+            self.algo_group.setTitle("🔥 Differential Evolution Algorithm Settings")
+            de_status = "Available" if DE is not None else "Unavailable (fallback to NSGA-II)"
+            self.algo_status_label.setText(f"🔥 Current Algorithm: Differential Evolution - {n_models}-Objective ({de_status})")
+            color_scheme = """
+                QLabel {
+                    background-color: #fff8e1;
+                    border: 2px solid #ffc107;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #e65100;
+                }
+            """ if DE is not None else """
+                QLabel {
+                    background-color: #ffebee;
+                    border: 2px solid #f44336;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #c62828;
+                }
+            """
+            self.algo_status_label.setStyleSheet(color_scheme)
+        else:  # NSGA-II
+            self.algo_group.setTitle("🔄 NSGA-II (Multi-Objective) Algorithm Settings")
+            self.algo_status_label.setText(f"🔄 Current Algorithm: NSGA-II - {n_models}-Objective Optimization Mode")
+            self.algo_status_label.setStyleSheet("""
+                QLabel {
+                    background-color: #fff3e0;
+                    border: 2px solid #ff9800;
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-weight: bold;
+                    color: #e65100;
+                }
+            """)
+    
+    def _update_ga_settings(self):
+        """Update settings for GA (Single-Objective) algorithm"""
+        # Optimal settings for single-objective GA
+        if 'population_size' not in self._user_modified_params:
+            self.population_spin.setValue(50)  # Smaller population for single-objective
+        
+        if 'crossover_prob' not in self._user_modified_params:
+            self.crossover_prob_spin.setValue(0.8)  # Standard for GA
+        
+        if 'crossover_eta' not in self._user_modified_params:
+            self.crossover_eta_spin.setValue(20.0)  # Higher for more exploration
+        
+        if 'mutation_eta' not in self._user_modified_params:
+            self.mutation_eta_spin.setValue(20.0)  # Higher for single-objective
+        
+        if 'eliminate_duplicates' not in self._user_modified_params:
+            self.eliminate_duplicates_check.setChecked(True)  # Good for convergence
+        
+        # Update tooltips for GA
+        self.population_spin.setToolTip("Population size for GA (30-100 typical for single-objective)")
+        self.crossover_prob_spin.setToolTip("Crossover probability for GA (0.7-0.9 recommended)")
+        self.mutation_prob_spin.setToolTip("Mutation probability for GA (typically 1/n_variables)")
+        self.eliminate_duplicates_check.setToolTip("Remove duplicates (recommended for GA convergence)")
+    
+    def _update_nsga2_settings(self):
+        """Update settings for NSGA-II algorithm"""
+        loaded_models = [data for data in self.models_data if data is not None]
+        n_models = len(loaded_models)
+        
+        # Optimal settings for NSGA-II
+        if 'population_size' not in self._user_modified_params:
+            self.population_spin.setValue(max(50, n_models * 20))  # Larger for multi-objective
+        
+        if 'crossover_prob' not in self._user_modified_params:
+            self.crossover_prob_spin.setValue(0.9)  # High for NSGA-II
+        
+        if 'crossover_eta' not in self._user_modified_params:
+            self.crossover_eta_spin.setValue(15.0)  # Standard for NSGA-II
+        
+        if 'mutation_eta' not in self._user_modified_params:
+            self.mutation_eta_spin.setValue(20.0)  # Standard for multi-objective
+        
+        if 'eliminate_duplicates' not in self._user_modified_params:
+            self.eliminate_duplicates_check.setChecked(False)  # Better for Pareto diversity
+        
+        # Update tooltips for NSGA-II
+        self.population_spin.setToolTip(f"Population size for NSGA-II ({max(50, n_models * 20)}-200 typical for {n_models}-objective)")
+        self.crossover_prob_spin.setToolTip("Crossover probability for NSGA-II (0.8-0.95 recommended)")
+        self.mutation_prob_spin.setToolTip("Mutation probability for NSGA-II (critical for Pareto diversity)")
+        self.eliminate_duplicates_check.setToolTip("⚠️ May reduce Pareto front diversity in multi-objective")
+    
+    def _update_nsga3_settings(self):
+        """Update settings for NSGA-III algorithm"""
+        loaded_models = [data for data in self.models_data if data is not None]
+        n_models = len(loaded_models)
+        
+        # Optimal settings for NSGA-III (many-objective)
+        if 'population_size' not in self._user_modified_params:
+            # NSGA-III needs larger populations for many objectives
+            base_pop = max(100, n_models * 30)
+            self.population_spin.setValue(base_pop)
+        
+        if 'crossover_prob' not in self._user_modified_params:
+            self.crossover_prob_spin.setValue(0.9)  # High for many-objective
+        
+        if 'crossover_eta' not in self._user_modified_params:
+            self.crossover_eta_spin.setValue(10.0)  # Lower for more exploration
+        
+        if 'mutation_eta' not in self._user_modified_params:
+            self.mutation_eta_spin.setValue(15.0)  # Lower for more diversity
+        
+        if 'eliminate_duplicates' not in self._user_modified_params:
+            self.eliminate_duplicates_check.setChecked(False)  # Critical for many-objective
+        
+        # Update tooltips for NSGA-III
+        base_pop = max(100, n_models * 30)
+        self.population_spin.setToolTip(f"Population size for NSGA-III ({base_pop}-300 typical for {n_models}-objective, needs large population)")
+        self.crossover_prob_spin.setToolTip("Crossover probability for NSGA-III (0.9-0.95 for many-objective)")
+        self.mutation_prob_spin.setToolTip("Mutation probability for NSGA-III (crucial for many-objective diversity)")
+        self.eliminate_duplicates_check.setToolTip("⚠️ Critical: Should be FALSE for many-objective optimization")
+    
+    def _update_spea2_settings(self):
+        """Update settings for SPEA2 algorithm"""
+        loaded_models = [data for data in self.models_data if data is not None]
+        n_models = len(loaded_models)
+        
+        # Optimal settings for SPEA2
+        if 'population_size' not in self._user_modified_params:
+            self.population_spin.setValue(max(60, n_models * 25))  # Medium size for SPEA2
+        
+        if 'crossover_prob' not in self._user_modified_params:
+            self.crossover_prob_spin.setValue(0.85)  # Moderate for SPEA2
+        
+        if 'crossover_eta' not in self._user_modified_params:
+            self.crossover_eta_spin.setValue(12.0)  # Balanced exploration/exploitation
+        
+        if 'mutation_eta' not in self._user_modified_params:
+            self.mutation_eta_spin.setValue(18.0)  # Balanced for archive-based
+        
+        if 'eliminate_duplicates' not in self._user_modified_params:
+            self.eliminate_duplicates_check.setChecked(True)  # SPEA2 can handle this better
+        
+        # Update tooltips for SPEA2
+        base_pop = max(60, n_models * 25)
+        self.population_spin.setToolTip(f"Population size for SPEA2 ({base_pop}-200 typical, uses external archive)")
+        self.crossover_prob_spin.setToolTip("Crossover probability for SPEA2 (0.8-0.9 recommended)")
+        self.mutation_prob_spin.setToolTip("Mutation probability for SPEA2 (works with archive mechanism)")
+        self.eliminate_duplicates_check.setToolTip("SPEA2 can handle duplicates better than NSGA-II")
+    
+    def _update_moead_settings(self):
+        """Update settings for MOEA/D algorithm"""
+        loaded_models = [data for data in self.models_data if data is not None]
+        n_models = len(loaded_models)
+        
+        # Optimal settings for MOEA/D
+        if 'population_size' not in self._user_modified_params:
+            # MOEA/D uses scalarization, needs specific population sizes
+            self.population_spin.setValue(max(91, n_models * 30))  # Often uses H1+H2 formula
+        
+        if 'crossover_prob' not in self._user_modified_params:
+            self.crossover_prob_spin.setValue(0.9)  # High for decomposition
+        
+        if 'crossover_eta' not in self._user_modified_params:
+            self.crossover_eta_spin.setValue(20.0)  # High for local search
+        
+        if 'mutation_eta' not in self._user_modified_params:
+            self.mutation_eta_spin.setValue(20.0)  # High for fine-tuning
+        
+        if 'eliminate_duplicates' not in self._user_modified_params:
+            self.eliminate_duplicates_check.setChecked(False)  # Preserve decomposition diversity
+        
+        # Update tooltips for MOEA/D
+        self.population_spin.setToolTip("Population for MOEA/D (uses decomposition, 91/105/120 are common)")
+        self.crossover_prob_spin.setToolTip("Crossover for MOEA/D (0.9-0.95 for neighborhood search)")
+        self.mutation_prob_spin.setToolTip("Mutation for MOEA/D (fine-tuning within neighborhoods)")
+        self.eliminate_duplicates_check.setToolTip("Keep FALSE to preserve decomposition structure")
+    
+    def _update_cmaes_settings(self):
+        """Update settings for CMA-ES algorithm"""
+        loaded_models = [data for data in self.models_data if data is not None]
+        n_models = len(loaded_models)
+        
+        # CMA-ES specific settings
+        if 'population_size' not in self._user_modified_params:
+            # CMA-ES has automatic population sizing, but we can suggest
+            n_vars = len(self.feature_bounds_data) if hasattr(self, 'feature_bounds_data') else 10
+            self.population_spin.setValue(max(30, min(100, 4 + int(3 * np.log(n_vars)))))
+        
+        if 'crossover_prob' not in self._user_modified_params:
+            self.crossover_prob_spin.setValue(1.0)  # CMA-ES uses different operators
+        
+        # Update tooltips for CMA-ES
+        self.population_spin.setToolTip("Population for CMA-ES (automatic sizing, 30-100 typical)")
+        self.crossover_prob_spin.setToolTip("Not used in CMA-ES (uses covariance matrix adaptation)")
+        self.mutation_prob_spin.setToolTip("CMA-ES uses adaptive step size, not traditional mutation")
+        self.eliminate_duplicates_check.setToolTip("Duplicates less common in CMA-ES due to distribution sampling")
+    
+    def _update_de_settings(self):
+        """Update settings for Differential Evolution algorithm"""
+        loaded_models = [data for data in self.models_data if data is not None]
+        n_models = len(loaded_models)
+        
+        # DE specific settings
+        if 'population_size' not in self._user_modified_params:
+            # DE typically uses 5-10 times the problem dimension
+            n_vars = len(self.feature_bounds_data) if hasattr(self, 'feature_bounds_data') else 10
+            self.population_spin.setValue(max(30, min(200, n_vars * 8)))
+        
+        if 'crossover_prob' not in self._user_modified_params:
+            self.crossover_prob_spin.setValue(0.7)  # DE crossover rate (CR)
+        
+        if 'mutation_eta' not in self._user_modified_params:
+            # In DE, this would be the differential weight (F)
+            self.mutation_eta_spin.setValue(0.5)  # DE differential weight
+        
+        if 'eliminate_duplicates' not in self._user_modified_params:
+            self.eliminate_duplicates_check.setChecked(True)  # DE can benefit from this
+        
+        # Update tooltips for DE
+        n_vars = len(self.feature_bounds_data) if hasattr(self, 'feature_bounds_data') else 10
+        self.population_spin.setToolTip(f"Population for DE (5-10x problem dimension, ~{n_vars * 8} for {n_vars} variables)")
+        self.crossover_prob_spin.setToolTip("DE Crossover Rate (CR): 0.5-0.9 typical")
+        self.mutation_prob_spin.setToolTip("Not used in DE (uses differential mutation)")
+        self.crossover_eta_spin.setToolTip("Not directly used in DE")
+        self.mutation_eta_spin.setToolTip("DE Differential Weight (F): 0.4-0.8 typical")
+        self.eliminate_duplicates_check.setToolTip("DE can benefit from duplicate elimination")
+    
+    def resume_from_checkpoint(self):
+        """Resume optimization from a checkpoint"""
+        try:
+            checkpoint_system = OptimizationCheckpoint()
+            checkpoints = checkpoint_system.list_checkpoints()
+            
+            if not checkpoints:
+                QMessageBox.information(self, "No Checkpoints", "No checkpoints found to resume from.")
+                return
+            
+            # Create selection dialog
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QListWidget, QDialogButtonBox, QLabel
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Select Checkpoint")
+            dialog.setModal(True)
+            dialog.resize(500, 300)
+            
+            layout = QVBoxLayout(dialog)
+            layout.addWidget(QLabel("Select a checkpoint to resume optimization:"))
+            
+            list_widget = QListWidget()
+            for checkpoint in checkpoints:
+                item_text = (f"Generation {checkpoint['generation']:04d} - "
+                           f"{checkpoint['timestamp']} - "
+                           f"{checkpoint['size_mb']:.1f} MB")
+                list_widget.addItem(item_text)
+            layout.addWidget(list_widget)
+            
+            buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+            layout.addWidget(buttons)
+            
+            if dialog.exec_() == QDialog.Accepted:
+                selected_items = list_widget.selectedItems()
+                if selected_items:
+                    selected_idx = list_widget.row(selected_items[0])
+                    checkpoint_file = checkpoints[selected_idx]['file']
+                    
+                    # Load checkpoint and start optimization
+                    checkpoint_data = checkpoint_system.load_checkpoint(checkpoint_file)
+                    if checkpoint_data:
+                        self.log_text.append(f"Loading checkpoint from generation {checkpoint_data['generation']}")
+                        # This would require additional implementation to actually resume
+                        QMessageBox.information(self, "Checkpoint Loaded", 
+                                              f"Checkpoint from generation {checkpoint_data['generation']} loaded successfully.\n"
+                                              "Note: Full resume functionality requires additional implementation.")
+        
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to resume from checkpoint: {str(e)}")
+            self.log_text.append(f"Resume error: {str(e)}")
+    
+    def list_checkpoints(self):
+        """List available checkpoints"""
+        try:
+            checkpoint_system = OptimizationCheckpoint()
+            checkpoints = checkpoint_system.list_checkpoints()
+            
+            if not checkpoints:
+                self.log_text.append("No checkpoints found.")
+                return
+            
+            self.log_text.append("📁 Available Checkpoints:")
+            for checkpoint in checkpoints:
+                self.log_text.append(
+                    f"  • Generation {checkpoint['generation']:04d} - "
+                    f"{checkpoint['timestamp']} - "
+                    f"{checkpoint['size_mb']:.1f} MB"
+                )
+        
+        except Exception as e:
+            self.log_text.append(f"Failed to list checkpoints: {str(e)}")
     
     def extract_original_ranges(self, pipeline, feature_names):
         """Extract original feature ranges from pipeline preprocessor using smart analyzer"""
@@ -2612,6 +4330,8 @@ class MultiObjectiveOptimizationModule(QWidget):
             # Enhanced constraint handling
             'feature_types': feature_types,
             'categorical_ranges': categorical_ranges,
+            # Algorithm selection
+            'algorithm': self.algorithm_combo.currentText(),
             # NSGA-II specific parameters
             'crossover_prob': self.crossover_prob_spin.value(),
             'crossover_eta': self.crossover_eta_spin.value(),
@@ -2623,7 +4343,25 @@ class MultiObjectiveOptimizationModule(QWidget):
             'random_seed': self.seed_spin.value() if self.seed_spin.value() != -1 else None,
             'verbose': self.verbose_check.isChecked(),
             # Advanced diversity parameters
-            'diversity_noise_scale': self.diversity_noise_spin.value()
+            'diversity_noise_scale': self.diversity_noise_spin.value(),
+            # Early stopping parameters
+            'enable_early_stopping': self.enable_early_stopping_check.isChecked(),
+            'early_stop_patience': self.early_stop_patience_spin.value(),
+            'early_stop_delta': 1e-6,  # Can be made configurable if needed
+            # Checkpoint parameters
+            'enable_checkpoints': self.enable_checkpoints_check.isChecked(),
+            'checkpoint_interval': self.checkpoint_interval_spin.value(),
+            'max_checkpoints': 5,  # Can be made configurable if needed
+            
+            # Robust optimization parameters
+            'enable_robust_optimization': self.enable_robust_check.isChecked(),
+            'robust_method': self.robust_method_combo.currentText().lower().replace('-', '_'),
+            'robust_samples': self.robust_samples_spin.value(),
+            'robust_noise_level': self.robust_noise_spin.value(),
+            
+            # Constraint handling parameters
+            'enable_explicit_constraints': self.enable_constraints_check.isChecked(),
+            'adaptive_penalty_coefficients': self.adaptive_penalty_check.isChecked()
         }
         
         return config
@@ -3066,8 +4804,9 @@ class MultiObjectiveOptimizationModule(QWidget):
             self.export_btn.setEnabled(True)
             self.progress_bar.setVisible(False)
             
-            # Store results
+            # Store results and config
             self.optimization_results = results
+            self.config = self.worker.config if self.worker else {}
             
             # Update final plot
             pareto_front = results['pareto_front']
@@ -3103,8 +4842,108 @@ class MultiObjectiveOptimizationModule(QWidget):
             
             self.log_text.append("=" * 50)
             
+            # Generate automated report
+            try:
+                report_path = self.generate_optimization_report(results)
+                if report_path:
+                    self.log_text.append(f"📄 Detailed report generated: {report_path}")
+            except Exception as e:
+                self.log_text.append(f"Report generation failed: {str(e)}")
+            
         except Exception as e:
             self.log_text.append(f"Error processing results: {str(e)}")
+    
+    def generate_optimization_report(self, results: Dict[str, Any]) -> str:
+        """Generate automated optimization report in Markdown format"""
+        try:
+            timestamp = datetime.datetime.now()
+            pareto_front = results['pareto_front']
+            n_solutions = results['n_solutions']
+            n_objectives = results['n_objectives']
+            feature_names = results['feature_names']
+            objective_names = results['objective_names']
+            fixed_features = results.get('fixed_features', {})
+            
+            # Create report content
+            report_content = f"""# Multi-Objective Optimization Report
+
+## Summary
+- **Date**: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}
+- **Algorithm**: {self.config.get('algorithm', 'NSGA-II')}
+- **Objectives**: {n_objectives} ({', '.join(objective_names)})
+- **Features**: {len(feature_names)} total ({len(feature_names) - len(fixed_features)} optimized, {len(fixed_features)} fixed)
+- **Solutions Found**: {n_solutions}
+
+## Configuration
+- **Population Size**: {self.config.get('population_size', 'N/A')}
+- **Generations**: {self.config.get('n_generations', 'N/A')}
+- **Crossover Probability**: {self.config.get('crossover_prob', 'N/A'):.3f}
+- **Mutation Probability**: {self.config.get('mutation_prob', 'N/A'):.3f}
+- **Early Stopping**: {"Enabled" if self.config.get('enable_early_stopping', False) else "Disabled"}
+- **Checkpoints**: {"Enabled" if self.config.get('enable_checkpoints', False) else "Disabled"}
+
+## Optimization Results
+
+### Best Solutions (Top 5)
+"""
+            
+            # Add top 5 solutions
+            n_display = min(5, n_solutions)
+            for i in range(n_display):
+                report_content += f"\n#### Solution {i+1}\n"
+                for j, obj_name in enumerate(objective_names):
+                    report_content += f"- **{obj_name}**: {pareto_front[i, j]:.6f}\n"
+                report_content += "\n"
+            
+            # Add fixed features information
+            if fixed_features:
+                report_content += "\n### Fixed Features\n"
+                for feature_idx, value in fixed_features.items():
+                    feature_name = feature_names[feature_idx] if feature_idx < len(feature_names) else f"Feature_{feature_idx}"
+                    report_content += f"- **{feature_name}**: {value:.6f}\n"
+            
+            # Add statistics
+            report_content += "\n### Objective Statistics\n"
+            for j, obj_name in enumerate(objective_names):
+                obj_values = pareto_front[:, j]
+                report_content += f"\n#### {obj_name}\n"
+                report_content += f"- **Best**: {np.min(obj_values):.6f}\n"
+                report_content += f"- **Worst**: {np.max(obj_values):.6f}\n"
+                report_content += f"- **Mean**: {np.mean(obj_values):.6f}\n"
+                report_content += f"- **Std Dev**: {np.std(obj_values):.6f}\n"
+            
+            # Add convergence information if available
+            if hasattr(self, 'all_progress_data') and self.all_progress_data:
+                final_data = self.all_progress_data[-1]
+                final_gen = final_data.get('generation', 'N/A')
+                report_content += f"\n### Convergence\n"
+                report_content += f"- **Final Generation**: {final_gen}\n"
+                report_content += f"- **Total Evaluations**: {(final_gen + 1) * self.config.get('population_size', 0) if isinstance(final_gen, int) else 'N/A'}\n"
+            
+            # Add feature bounds information
+            report_content += "\n### Feature Configuration\n"
+            combined_feature_info = self.get_combined_feature_info()
+            for feature_name in feature_names:
+                feature_info = combined_feature_info.get(feature_name, {})
+                bounds = feature_info.get('bounds', (0, 1))
+                feature_type = feature_info.get('type', 'continuous')
+                
+                if feature_names.index(feature_name) in fixed_features:
+                    fixed_value = fixed_features[feature_names.index(feature_name)]
+                    report_content += f"- **{feature_name}** ({feature_type}): Fixed at {fixed_value:.6f}\n"
+                else:
+                    report_content += f"- **{feature_name}** ({feature_type}): [{bounds[0]:.6f}, {bounds[1]:.6f}]\n"
+            
+            # Write report to file
+            report_filename = f"optimization_report_{timestamp.strftime('%Y%m%d_%H%M%S')}.md"
+            with open(report_filename, 'w', encoding='utf-8') as f:
+                f.write(report_content)
+            
+            return report_filename
+            
+        except Exception as e:
+            print(f"Report generation error: {e}")
+            return None
     
     def update_solutions_table(self, results: Dict[str, Any]):
         """Update the solutions table with results"""

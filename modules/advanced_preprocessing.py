@@ -49,7 +49,12 @@ from matplotlib.figure import Figure
 import warnings
 warnings.filterwarnings('ignore')
 from concurrent.futures import ThreadPoolExecutor
-import psutil
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("Warning: psutil not installed, system monitoring will be disabled")
 import gc
 
 class PerformanceOptimizer:

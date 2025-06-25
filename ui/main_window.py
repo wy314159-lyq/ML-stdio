@@ -21,6 +21,8 @@ from modules.shap_analysis import SHAPAnalysisModule
 from modules.target_optimization import TargetOptimizationModule
 from modules.multi_objective_optimization import MultiObjectiveOptimizationModule
 
+from ui.active_learning_window import ActiveLearningWindow
+
 
 class MatSciMLStudioWindow(QMainWindow):
     """Main application window"""
@@ -155,6 +157,10 @@ class MatSciMLStudioWindow(QMainWindow):
         # Module 11: Single & Multi-Objective Optimization
         self.multi_objective_optimization = MultiObjectiveOptimizationModule()
         self.tab_widget.addTab(self.multi_objective_optimization, "🔄 Optimization")
+        
+        # Module 12: Active Learning & Optimization
+        self.active_learning_window = ActiveLearningWindow()
+        self.tab_widget.addTab(self.active_learning_window, "🤖 Active Learning & Optimization")
         
         # Connect modules
         self.connect_modules()
@@ -398,7 +404,7 @@ class MatSciMLStudioWindow(QMainWindow):
         """Show about dialog"""
         about_text = """
         <h2>MatSci-ML Studio v1.0</h2>
-       本软件为四川大学王宇博士开发，欢迎使用！，如果有什么问题及bug，请联系邮箱1255201958@qq.com
+        This software is developed by Dr. Yu Wang from Sichuan University. Welcome to use! If you have any questions or bugs, please contact the email 1255201958@qq.com
         """
         
         QMessageBox.about(self, "About MatSci-ML Studio", about_text)

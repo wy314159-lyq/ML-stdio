@@ -3,9 +3,16 @@ Real-time Progress and Performance Monitor for MatSci-ML Studio
 """
 
 import time
-import psutil
 import threading
 from typing import Dict, List, Optional, Any
+
+# Optional psutil import with fallback
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("Warning: psutil not installed, system monitoring will be disabled")
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QLabel, QProgressBar, QTextEdit, QPushButton,
                             QTableWidget, QTableWidgetItem, QSplitter,
@@ -55,6 +62,17 @@ class SystemMonitorWorker(QThread):
     
     def collect_system_stats(self):
         """Collect system statistics"""
+        if not PSUTIL_AVAILABLE:
+            # Return dummy stats if psutil is not available
+            return {
+                'timestamp': time.time(),
+                'cpu': {'percent': 0, 'count': 1, 'frequency': 0},
+                'memory': {'total': 1, 'available': 1, 'percent': 0, 'used': 0},
+                'disk': {'total': 1, 'used': 0, 'free': 1, 'percent': 0},
+                'network': {'bytes_sent': 0, 'bytes_recv': 0},
+                'process': {'memory_mb': 0, 'cpu_percent': 0}
+            }
+        
         try:
             # CPU information
             cpu_percent = psutil.cpu_percent(interval=0.1)
@@ -243,6 +261,13 @@ class PerformanceMonitor(QWidget):
         self.task_tracker = TaskProgressTracker()
         self.system_stats_history = []
         
+        # Alert status tracking to prevent repeated warnings
+        self.cpu_alert_sent = False
+        self.memory_alert_sent = False
+        # Persistent alert flags - once shown, never show again
+        self.cpu_alert_shown_once = False
+        self.memory_alert_shown_once = False
+        
         self.init_ui()
         self.start_monitoring()
         
@@ -408,6 +433,16 @@ class PerformanceMonitor(QWidget):
         
     def start_monitoring(self):
         """Start monitoring"""
+        if not PSUTIL_AVAILABLE:
+            # Update UI to show that monitoring is disabled
+            self.cpu_label.setText("CPU: Monitoring disabled (psutil not available)")
+            self.memory_label.setText("Memory: Monitoring disabled (psutil not available)")
+            self.system_details_text.setText("System monitoring is disabled because psutil is not installed.\n"
+                                            "To enable system monitoring, install psutil:\n"
+                                            "pip install psutil")
+            self.process_info_text.setText("Process monitoring is disabled (psutil not available)")
+            return
+            
         if self.system_monitor is None:
             self.system_monitor = SystemMonitorWorker()
             self.system_monitor.system_stats_updated.connect(self.update_system_stats)
@@ -505,15 +540,25 @@ CPU Usage: {stats['process']['cpu_percent']:.1f}%"""
     def check_performance_alerts(self, stats):
         """Check performance alerts"""
         try:
-            # High CPU warning
+            # High CPU warning - only show once per session
             if stats['cpu']['percent'] > 90:
-                self.performance_alert.emit('cpu_high', f"High CPU usage: {stats['cpu']['percent']:.1f}%")
+                if not self.cpu_alert_sent and not self.cpu_alert_shown_once:
+                    self.performance_alert.emit('cpu_high', f"High CPU usage: {stats['cpu']['percent']:.1f}%")
+                    self.cpu_alert_sent = True
+                    self.cpu_alert_shown_once = True  # Mark as shown, never show again
+            else:
+                self.cpu_alert_sent = False
             
-            # High memory warning
+            # High memory warning - only show once per session
             if stats['memory']['percent'] > 90:
-                self.performance_alert.emit('memory_high', f"High memory usage: {stats['memory']['percent']:.1f}%")
+                if not self.memory_alert_sent and not self.memory_alert_shown_once:
+                    self.performance_alert.emit('memory_high', f"High memory usage: {stats['memory']['percent']:.1f}%")
+                    self.memory_alert_sent = True
+                    self.memory_alert_shown_once = True  # Mark as shown, never show again
+            else:
+                self.memory_alert_sent = False
             
-            # Low disk space warning
+            # Low disk space warning - keep as is for critical warnings
             if stats['disk']['percent'] > 90:
                 self.performance_alert.emit('disk_full', f"Low disk space: {stats['disk']['percent']:.1f}%")
                 
