@@ -970,13 +970,7 @@ class RobustOptimizationHandler:
         self.uncertainty_cache = {}
     
     def evaluate_robust_objectives(self, models, model_indices, x, feature_names, directions):
-        """
-        Evaluate objectives under uncertainty
-        
-        Returns:
-        - robust_objectives: Array of robust objective values (mean ± risk_factor * std)
-        - uncertainty_metrics: Dict with uncertainty information
-        """
+       
         method = self.config['method']
         n_samples = self.config['n_samples']
         noise_level = self.config['noise_level']
@@ -1304,10 +1298,7 @@ class OptimizationCallback(Callback):
 
 
 class MLProblem(Problem):
-    """
-    Enhanced pymoo Problem class that wraps multiple scikit-learn models for multi-objective optimization
-    with strict constraint handling and mixed variable type support.
-    """
+  
     
     def __init__(self, models, model_indices, directions, n_var, xl, xu, feature_names, 
                  fixed_features=None, feature_types=None, categorical_ranges=None, 
@@ -1637,25 +1628,25 @@ class MultiObjectiveOptimizationWorker(QThread):
                 # For single-objective optimization, use standard settings
                 eliminate_duplicates_adjusted = eliminate_duplicates
                 min_pop_size = max(30, len(feature_names) * 2)  # Smaller population for single objective
-                self.status_updated.emit("配置单目标优化策略...")
+                self.status_updated.emit("Configuring single-objective optimization strategy...")  
             else:
                 # CRITICAL FIX: 调整重复解消除策略，避免帕累托前沿收缩为单点
                 # 对于多目标优化，过度的重复解消除会严重限制解的多样性
                 if eliminate_duplicates and len(models) >= 2:
                     # 对于多目标情况，使用更宽松的重复检测，保持解的多样性
                     eliminate_duplicates_adjusted = False
-                    self.status_updated.emit("⚠️  调整重复解消除策略以保持帕累托前沿多样性")
+                    self.status_updated.emit("⚠️  Adjusting duplicate elimination strategy to maintain Pareto front diversity")
                 else:
                     eliminate_duplicates_adjusted = eliminate_duplicates
                 
                 # 自动调整种群大小，确保有足够的多样性
                 min_pop_size = max(50, len(models) * 20)  # 每个目标至少20个个体
-                self.status_updated.emit("配置多目标优化策略...")
+                self.status_updated.emit("Configuring multi-objective optimization strategy...")
             
             # Adjust population size
             if population_size < min_pop_size:
                 population_size_adjusted = min_pop_size
-                self.status_updated.emit(f"⚠️  种群大小调整为 {min_pop_size} 以保证收敛性")
+                self.status_updated.emit(f"⚠️  Population size adjusted to {min_pop_size} to ensure convergence")
             else:
                 population_size_adjusted = population_size
             
@@ -1678,7 +1669,7 @@ class MultiObjectiveOptimizationWorker(QThread):
                 
                 if has_mixed_variables:
                     # For mixed variables, use custom sampling and repair
-                    self.status_updated.emit("🔧 检测到混合变量，使用专门的约束处理策略...")
+                    self.status_updated.emit("🔧 Detected mixed variables, using specialized constraint handling strategy...") 
                     
                     # Create mixed-variable sampling
                     sampling = MixedVariableSampling(
@@ -1693,12 +1684,12 @@ class MultiObjectiveOptimizationWorker(QThread):
                         fixed_features=fixed_features
                     )
                     
-                    self.status_updated.emit(f"   📋 特征类型分布:")
+                    self.status_updated.emit(f"   📋 Feature type distribution:")
                     type_counts = {}
                     for ftype in feature_types:
                         type_counts[ftype] = type_counts.get(ftype, 0) + 1
                     for ftype, count in type_counts.items():
-                        self.status_updated.emit(f"      {ftype}: {count} 个特征")
+                        self.status_updated.emit(f"      {ftype}: {count} features")
                 else:
                     # For continuous variables only, use standard operators
                     try:
@@ -1708,7 +1699,7 @@ class MultiObjectiveOptimizationWorker(QThread):
                         from pymoo.operators.sampling.random_sampling import FloatRandomSampling
                     sampling = FloatRandomSampling()
                     repair = None
-                    self.status_updated.emit("📈 所有特征为连续型，使用标准优化策略")
+                    self.status_updated.emit("📈 All features are continuous, using standard optimization strategy")
                 
                 # Configure crossover operator
                 crossover = SBX(prob=crossover_prob, eta=crossover_eta) if SBX else None
@@ -1938,9 +1929,9 @@ class MultiObjectiveOptimizationWorker(QThread):
                     self.status_updated.emit(f"✅ Created NSGA-II algorithm for multi-objective optimization")
                 
                 if has_mixed_variables:
-                    self.status_updated.emit(f"✅ 混合变量算法配置完成：变异率={mutation_prob_adjusted:.3f}")
+                    self.status_updated.emit(f"✅ Mixed variable algorithm configuration completed: mutation rate={mutation_prob_adjusted:.3f}")
                 else:
-                    self.status_updated.emit(f"✅ 连续变量算法配置完成：变异率={mutation_prob_adjusted:.3f}")
+                    self.status_updated.emit(f"✅ Continuous variable algorithm configuration completed: mutation rate={mutation_prob_adjusted:.3f}")
                 
             except ImportError:
                 # 如果无法导入高级算子，使用基础配置
@@ -1968,7 +1959,7 @@ class MultiObjectiveOptimizationWorker(QThread):
                                 repair=repair,
                                 eliminate_duplicates=False
                             )
-                        self.status_updated.emit("⚠️  使用基础算子配置+约束修复")
+                        self.status_updated.emit("⚠️  Using basic operator configuration + constraint repair")
                     except Exception:
                         if is_single_objective:
                             from pymoo.algorithms.soo.nonconvex.ga import GA
@@ -1981,7 +1972,7 @@ class MultiObjectiveOptimizationWorker(QThread):
                                 pop_size=population_size_adjusted,
                                 eliminate_duplicates=False
                             )
-                        self.status_updated.emit("⚠️  使用最基础配置（约束可能无法完全满足）")
+                        self.status_updated.emit("⚠️  Using basic configuration (constraints may not be fully satisfied)")
                 else:
                     if is_single_objective:
                         from pymoo.algorithms.soo.nonconvex.ga import GA
@@ -1994,22 +1985,22 @@ class MultiObjectiveOptimizationWorker(QThread):
                             pop_size=population_size_adjusted,
                             eliminate_duplicates=False
                         )
-                    self.status_updated.emit("⚠️  使用基础算子配置")
+                    self.status_updated.emit("⚠️  Using basic operator configuration")
             
             if verbose:
                 self.status_updated.emit(f"Algorithm configured (enhanced diversity mode):")
-                self.status_updated.emit(f"- Population size: {population_size_adjusted} (原始: {population_size})")
+                self.status_updated.emit(f"- Population size: {population_size_adjusted} (Original: {population_size})")
                 self.status_updated.emit(f"- Generations: {n_generations}")
                 self.status_updated.emit(f"- Objectives: {len(models)}")
                 self.status_updated.emit(f"- Variables: {len(feature_names)}")
                 self.status_updated.emit(f"- Categorical features: {len([t for t in feature_types if t in ['binary', 'categorical']])} features")
-                self.status_updated.emit(f"- Eliminate duplicates: {eliminate_duplicates_adjusted} (原始: {eliminate_duplicates})")
+                self.status_updated.emit(f"- Eliminate duplicates: {eliminate_duplicates_adjusted} (Original: {eliminate_duplicates})")
                 if fixed_features:
                     self.status_updated.emit(f"- Fixed features: {len(fixed_features)} / {len(feature_names)}")
                     free_features = len(feature_names) - len(fixed_features)
                     self.status_updated.emit(f"- Free features: {free_features}")
                     if free_features < 2:
-                        self.status_updated.emit("⚠️  自由特征数量很少，可能影响帕累托前沿多样性")
+                        self.status_updated.emit("⚠️  Few free features, which may affect Pareto front diversity")
                 if random_seed is not None:
                     self.status_updated.emit(f"- Random seed: {random_seed}")
                 
@@ -2018,10 +2009,10 @@ class MultiObjectiveOptimizationWorker(QThread):
                 for i, bounds in enumerate(feature_bounds):
                     if i not in fixed_features:
                         search_space_size *= (bounds[1] - bounds[0])
-                self.status_updated.emit(f"- 估计搜索空间大小: {search_space_size:.2e}")
+                self.status_updated.emit(f"- Estimated search space size: {search_space_size:.2e}")
                 
                 if search_space_size < 1e-6:
-                    self.status_updated.emit("⚠️  搜索空间可能过小，建议检查特征边界设置")
+                    self.status_updated.emit("⚠️  Search space may be too small, please check feature boundary settings")
             
             # Set termination criteria with optional early stopping
             use_early_stopping = self.config.get('enable_early_stopping', True)
@@ -2030,7 +2021,7 @@ class MultiObjectiveOptimizationWorker(QThread):
                 # TODO: Fix early stopping mechanism in future version
                 termination = get_termination("n_gen", n_generations)
                 early_stop = None
-                self.status_updated.emit(f"🔄 运行标准 {n_generations} 代优化（早停功能暂时禁用以确保完整运行）")
+                self.status_updated.emit(f"🔄 Running standard {n_generations} generations (early stopping temporarily disabled to ensure full run)")
             else:
                 # Standard generation-based termination
                 termination = get_termination("n_gen", n_generations)
@@ -2131,7 +2122,7 @@ class MultiObjectiveOptimizationWorker(QThread):
                                     violations_found = True
                     
                     if violations_found:
-                        self.status_updated.emit("⚠️  约束违反被检测到，应用最终修复...")
+                        self.status_updated.emit("⚠️  Constraint violations detected, applying final repair...")
                         
                         # Apply final repair only if needed
                         try:
@@ -2199,9 +2190,9 @@ class MultiObjectiveOptimizationWorker(QThread):
                     })
                     
                     if is_single_objective:
-                        self.status_updated.emit(f"目标值: 最优={np.min(obj_values):.6f}, 平均={obj_mean:.6f}, 标准差={obj_std:.6f}")
+                        self.status_updated.emit(f"Objective values: Best={np.min(obj_values):.6f}, Mean={obj_mean:.6f}, Std={obj_std:.6f}")
                     else:
-                        self.status_updated.emit(f"目标 {i+1}: 范围={obj_range:.6f}, 标准差={obj_std:.6f}")
+                        self.status_updated.emit(f"Objective {i+1}: Range={obj_range:.6f}, Std={obj_std:.6f}")
                 
                 # 检查解的多样性
                 solution_diversity = []
@@ -2212,26 +2203,26 @@ class MultiObjectiveOptimizationWorker(QThread):
                         solution_diversity.append(feature_range)
                 
                 avg_solution_diversity = np.mean(solution_diversity) if solution_diversity else 0
-                self.status_updated.emit(f"解的平均多样性: {avg_solution_diversity:.6f}")
+                self.status_updated.emit(f"Average solution diversity: {avg_solution_diversity:.6f}")
                 
                 # 优化结果质量评估
                 if is_single_objective:
                     if n_solutions == 1:
-                        self.status_updated.emit("✅ 单目标优化找到最优解")
+                        self.status_updated.emit("✅ Single-objective optimization found the optimal solution")
                     else:
-                        self.status_updated.emit(f"✅ 单目标优化找到 {n_solutions} 个优质解")
+                        self.status_updated.emit(f"✅ Single-objective optimization found {n_solutions} high-quality solutions")
                 else:
                     # 多目标优化的质量评估
                     if n_solutions == 1:
-                        self.status_updated.emit("⚠️  帕累托前沿只有1个点 - 这可能表明:")
-                        self.status_updated.emit("   1. 搜索空间过于受限")
-                        self.status_updated.emit("   2. 固定特征太多")
-                        self.status_updated.emit("   3. 目标函数返回相同值")
-                        self.status_updated.emit("   4. 重复消除过于严格")
+                        self.status_updated.emit("⚠️  Pareto front only has 1 point - this may indicate:")
+                        self.status_updated.emit("   1. Search space too restricted")
+                        self.status_updated.emit("   2. Too many fixed features")
+                        self.status_updated.emit("   3. Target function returns same value")
+                        self.status_updated.emit("   4. Duplicate elimination too strict")
                     elif n_solutions < 10:
-                        self.status_updated.emit(f"⚠️  帕累托前沿解数量较少 ({n_solutions})")
+                        self.status_updated.emit(f"⚠️  Pareto front has few solutions ({n_solutions})")
                     else:
-                        self.status_updated.emit(f"✅ 帕累托前沿包含 {n_solutions} 个多样化解")
+                        self.status_updated.emit(f"✅ Pareto front contains {n_solutions} diverse solutions")
                 
                 results = {
                     'pareto_front': original_objectives,
@@ -2251,16 +2242,16 @@ class MultiObjectiveOptimizationWorker(QThread):
                 # Report optimization completion with quality assessment
                 if is_single_objective:
                     if n_solutions == 1:
-                        completion_msg = f"✅ 单目标优化成功完成！找到最优解。"
+                        completion_msg = f"✅ Single-objective optimization completed successfully! Found the optimal solution."
                     else:
-                        completion_msg = f"✅ 单目标优化成功完成！找到 {n_solutions} 个优质解。"
+                        completion_msg = f"✅ Single-objective optimization completed successfully! Found {n_solutions} high-quality solutions."
                 else:
                     if n_solutions >= 10:
-                        completion_msg = f"✅ 多目标优化成功完成！找到 {n_solutions} 个高质量帕累托最优解。"
+                        completion_msg = f"✅ Multi-objective optimization completed successfully! Found {n_solutions} high-quality Pareto optimal solutions."
                     elif n_solutions > 1:
-                        completion_msg = f"⚠️  多目标优化完成，找到 {n_solutions} 个帕累托最优解（建议检查参数设置）。"
+                        completion_msg = f"⚠️  Multi-objective optimization completed, found {n_solutions} Pareto optimal solutions (consider checking parameter settings)."
                     else:
-                        completion_msg = f"⚠️  多目标优化完成，但只找到 {n_solutions} 个解（建议调整算法参数）。"
+                        completion_msg = f"⚠️  Multi-objective optimization completed, but only found {n_solutions} solutions (consider adjusting algorithm parameters)."
                 
                 self.status_updated.emit(completion_msg)
                 self.optimization_completed.emit(results)

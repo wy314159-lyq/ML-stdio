@@ -322,7 +322,7 @@ class AnalysisWorker(QObject):
 
 
 class CustomTableWidget(QTableWidget):
-    """Custom table widget with better formatting and interaction."""
+
     
     def __init__(self):
         super().__init__()
@@ -3305,32 +3305,32 @@ Threading Architecture:
                 self.status_bar.showMessage(f"Generated {len(candidate_df)} candidate samples successfully")
                 
                 # 重要：显示详细信息确认数据已正确加载
-                info_message = f"已成功生成并加载 {len(candidate_df)} 个候选样本！\n\n"
-                info_message += f"数据维度：{len(candidate_df)} 行 × {len(candidate_df.columns)} 列\n"
-                info_message += f"列名：{', '.join(candidate_df.columns.tolist())}\n\n"
+                info_message = f"Successfully generated and loaded {len(candidate_df)} candidate samples!\n\n"
+                info_message += f"Data dimensions: {len(candidate_df)} rows × {len(candidate_df.columns)} columns\n"
+                info_message += f"Column names: {', '.join(candidate_df.columns.tolist())}\n\n"
                 
                 # 显示自动应用的设置信息
                 if generation_settings:
-                    info_message += "🎯 已自动应用以下设置到主界面：\n"
+                    info_message += "🎯 The following settings have been automatically applied to the main interface：\n"
                     info_message += f"• 目标变量: {', '.join(generation_settings['targets'])}\n"
                     info_message += f"• 特征数量: {len(generation_settings['features'])} 个\n"
-                    info_message += f"• 优化模式: {'单目标' if generation_settings['target_mode'] == 'single' else '多目标'}\n\n"
+                    info_message += f"• 优化模式: {'Single-objective' if generation_settings['target_mode'] == 'single' else 'Multi-objective'}\n\n"
                 
                 # 如果数据量少于1000，可能是约束过滤的结果
                 if len(candidate_df) < 1000:
-                    info_message += "⚠️ 注意：如果您期望更多样本，可能是约束条件过于严格。\n"
-                    info_message += "💡 建议：在候选生成器中启用'保证精确样本数量'选项。\n\n"
+                    info_message += "⚠️ Note: If you expected more samples, it might be due to overly strict constraints.\n"
+                    info_message += "💡 Suggestion: Enable the 'Ensure Exact Sample Count' option in the candidate generator.\n\n"
                 
-                info_message += "数据已设置为虚拟数据集，主界面设置已同步，可以直接开始运行分析。"
+                info_message += "Data has been set as a virtual dataset, and the main interface settings have been synchronized, allowing direct start of analysis."
                 
-                QMessageBox.information(self, "候选数据生成成功", info_message)
+                QMessageBox.information(self, "Candidate Data Generation Success", info_message)
             else:
-                QMessageBox.warning(self, "错误", "候选数据生成失败！")
+                QMessageBox.warning(self, "Error", "Candidate data generation failed!")
         else:
-            QMessageBox.information(self, "取消", "候选数据生成已取消。")
+            QMessageBox.information(self, "Cancel", "Candidate data generation cancelled.")
     
     def apply_generation_settings(self, settings):
-        """将候选生成器的设置应用到主界面"""
+      
         try:
             print(f"Applying generation settings: {settings}")
             
@@ -3737,7 +3737,7 @@ Threading Architecture:
             # Update status labels
             if hasattr(self, 'learning_status_label'):
                 iteration_count = self.session.get_iteration_count()
-                self.learning_status_label.setText(f"状态：已完成 {iteration_count} 次迭代")
+                self.learning_status_label.setText(f"Status: {iteration_count} iterations completed")
             
             # Show success message and automatically start next iteration
             iteration_count = self.session.get_iteration_count()
@@ -4243,7 +4243,6 @@ Learning curves will appear after more iterations"""
         return ratio
     
     def generate_batch_recommendations(self, results_data, batch_size):
-        """Generate batch recommendations using diversity-based selection."""
         if len(results_data) < batch_size:
             return results_data
         
@@ -4301,7 +4300,7 @@ Learning curves will appear after more iterations"""
         return sorted_data.loc[selected_indices]
     
     def update_cost_benefit_visualization(self):
-        """Update cost-benefit analysis visualization."""
+
         if not self.cost_benefit_data:
             return
         
@@ -4390,7 +4389,7 @@ class CandidateGeneratorDialog(QDialog):
         self.init_simple_ui()
     
     def init_simple_ui(self):
-        """创建简化的UI界面"""
+
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         
@@ -4458,10 +4457,10 @@ class CandidateGeneratorDialog(QDialog):
         widget = QWidget()
         layout = QFormLayout(widget)
         
-        # 目标变量选择 - 简化为下拉框
+       
         self.target_combo = QComboBox()
         self.target_combo.addItems(self.numeric_columns)
-        layout.addRow("目标变量:", self.target_combo)
+        layout.addRow("Target Variable:", self.target_combo)
         
         # 生成方法 - 简化选项
         self.method_combo = QComboBox()
@@ -4473,7 +4472,7 @@ class CandidateGeneratorDialog(QDialog):
         ]
         for value, text in methods:
             self.method_combo.addItem(text, value)
-        layout.addRow("生成方法:", self.method_combo)
+        layout.addRow("Generation Method:", self.method_combo)
         
         # 批次大小设置
         self.batch_size_spin = QSpinBox()
@@ -4514,12 +4513,12 @@ class CandidateGeneratorDialog(QDialog):
         layout.addRow("Random Seed:", self.seed_spin)
         
         # 约束条件 - 简化为文本输入
-        constraint_label = QLabel("约束条件 (可选，每行一个):")
+        constraint_label = QLabel("Constraints (optional, one per line):")
         layout.addRow(constraint_label)
         
         self.constraints_text = QTextEdit()
         self.constraints_text.setMaximumHeight(100)
-        self.constraints_text.setPlaceholderText("例如: feature1 >= 0.1\nfeature2 <= 0.9")
+        self.constraints_text.setPlaceholderText("For example: feature1 >= 0.1\nfeature2 <= 0.9")
         layout.addRow(self.constraints_text)
         
         # 生成模式
@@ -5842,7 +5841,7 @@ class OptimizedCandidateDialog(QDialog):
         layout.addWidget(target_group)
         
         # 生成方法选择
-        method_group = QGroupBox("📊 生成方法")
+        method_group = QGroupBox("📊 Generation Method")
         method_layout = QFormLayout(method_group)
         
         self.method_combo = QComboBox()
@@ -6212,7 +6211,7 @@ class OptimizedCandidateDialog(QDialog):
             preview_dialog.exec_()
     
     def optimized_generate(self):
-        """优化的候选生成方法 - 保持全功能"""
+       
         try:
             # 获取参数
             targets = self.get_selected_targets_optimized()
