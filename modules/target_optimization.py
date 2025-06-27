@@ -93,7 +93,7 @@ class GeneticAlgorithm:
     """Enhanced Genetic Algorithm with real-time progress tracking"""
     
     def __init__(self, objective_func, bounds, population_size=50, max_generations=100, 
-                 mutation_rate=0.1, crossover_rate=0.8, elite_size=5, callback=None):
+                 mutation_rate=0.1, crossover_rate=0.8, elite_size=5, callback=None, feature_types=None):
         self.objective_func = objective_func
         self.bounds = bounds
         self.population_size = population_size
@@ -105,22 +105,56 @@ class GeneticAlgorithm:
         self.dimension = len(bounds)
         self.should_stop = False
         
+        # **HYBRID GA ENHANCEMENT**: Store feature types for mixed variable handling
+        # Default to 'continuous' for backward compatibility
+        if feature_types is None:
+            self.feature_types = ['continuous'] * self.dimension
+        else:
+            self.feature_types = feature_types
+            
+        # Validate feature types length matches bounds
+        if len(self.feature_types) != self.dimension:
+            print(f"[WARNING] Feature types length ({len(self.feature_types)}) doesn't match bounds ({self.dimension}). Using continuous for all.")
+            self.feature_types = ['continuous'] * self.dimension
+            
+        # Count different feature types for debugging
+        continuous_count = sum(1 for ft in self.feature_types if ft == 'continuous')
+        categorical_count = sum(1 for ft in self.feature_types if ft in ['categorical', 'binary', 'integer'])
+        print(f"[HYBRID GA] Initialized with {continuous_count} continuous and {categorical_count} discrete features")
+        
         # Real-time tracking
         self.generation_history = []
         self.best_fitness_history = []
         self.population_diversity = []
         
     def initialize_population(self):
-        """Initialize random population within bounds"""
+        """Initialize random population within bounds with hybrid feature type support"""
+        print(f"[GA INIT] Initializing population with {len(self.bounds)} bounds")
+        print(f"[GA INIT] First 5 bounds: {self.bounds[:5]}")
+        print(f"[GA INIT] Feature types: {self.feature_types[:5]}...")
+        
         population = []
         for _ in range(self.population_size):
             individual = []
-            for min_val, max_val in self.bounds:
+            for i, (min_val, max_val) in enumerate(self.bounds):
                 if min_val == max_val:
+                    # Fixed parameter
                     individual.append(min_val)
+                elif self.feature_types[i] == 'continuous':
+                    # Continuous feature: use uniform distribution
+                    value = np.random.uniform(min_val, max_val)
+                    individual.append(value)
                 else:
-                    individual.append(np.random.uniform(min_val, max_val))
+                    # Categorical/binary/integer feature: use discrete uniform selection
+                    # Generate random integer within bounds (inclusive)
+                    discrete_value = np.random.randint(int(min_val), int(max_val) + 1)
+                    individual.append(float(discrete_value))  # Convert to float for consistency
             population.append(np.array(individual))
+            
+        # Debug first individual
+        if population:
+            print(f"[GA INIT] First individual (first 5 features): {population[0][:5]}")
+            
         return population
     
     def evaluate_population(self, population):
@@ -161,70 +195,110 @@ class GeneticAlgorithm:
         return selected
     
     def crossover(self, parent1, parent2):
-        """Simulated Binary Crossover (SBX) for real-valued optimization"""
+        """Hybrid crossover: SBX for continuous features, uniform crossover for discrete features"""
         if np.random.random() > self.crossover_rate:
             return parent1.copy(), parent2.copy()
         
-        eta = 2.0  # Distribution index
+        eta = 2.0  # Distribution index for SBX
         child1, child2 = parent1.copy(), parent2.copy()
         
         for i in range(len(parent1)):
-            if np.random.random() <= 0.5:
-                if abs(parent1[i] - parent2[i]) > 1e-14:
-                    if parent1[i] < parent2[i]:
-                        y1, y2 = parent1[i], parent2[i]
-                    else:
-                        y1, y2 = parent2[i], parent1[i]
-                    
-                    yl, yu = self.bounds[i][0], self.bounds[i][1]
-                    
-                    rand = np.random.random()
-                    beta = 1.0 + (2.0 * (y1 - yl) / (y2 - y1))
-                    alpha = 2.0 - beta ** -(eta + 1.0)
-                    
-                    if rand <= (1.0 / alpha):
-                        betaq = (rand * alpha) ** (1.0 / (eta + 1.0))
-                    else:
-                        betaq = (1.0 / (2.0 - rand * alpha)) ** (1.0 / (eta + 1.0))
-                    
-                    c1 = 0.5 * ((y1 + y2) - betaq * (y2 - y1))
-                    c2 = 0.5 * ((y1 + y2) + betaq * (y2 - y1))
-                    
-                    child1[i] = np.clip(c1, yl, yu)
-                    child2[i] = np.clip(c2, yl, yu)
+            if self.feature_types[i] == 'continuous':
+                # **CONTINUOUS FEATURE**: Use Simulated Binary Crossover (SBX)
+                # This preserves the powerful continuous optimization capabilities
+                if np.random.random() <= 0.5:
+                    if abs(parent1[i] - parent2[i]) > 1e-14:
+                        if parent1[i] < parent2[i]:
+                            y1, y2 = parent1[i], parent2[i]
+                        else:
+                            y1, y2 = parent2[i], parent1[i]
+                        
+                        yl, yu = self.bounds[i][0], self.bounds[i][1]
+                        
+                        rand = np.random.random()
+                        beta = 1.0 + (2.0 * (y1 - yl) / (y2 - y1))
+                        alpha = 2.0 - beta ** -(eta + 1.0)
+                        
+                        if rand <= (1.0 / alpha):
+                            betaq = (rand * alpha) ** (1.0 / (eta + 1.0))
+                        else:
+                            betaq = (1.0 / (2.0 - rand * alpha)) ** (1.0 / (eta + 1.0))
+                        
+                        c1 = 0.5 * ((y1 + y2) - betaq * (y2 - y1))
+                        c2 = 0.5 * ((y1 + y2) + betaq * (y2 - y1))
+                        
+                        child1[i] = np.clip(c1, yl, yu)
+                        child2[i] = np.clip(c2, yl, yu)
+            else:
+                # **DISCRETE FEATURE**: Use Uniform Crossover
+                # Simple and effective for categorical/binary/integer features
+                if np.random.random() <= 0.5:
+                    # Swap the values between parents
+                    child1[i], child2[i] = parent2[i], parent1[i]
+                # If not swapping, children inherit parent values directly
+                
+                # Ensure discrete values remain integers
+                yl, yu = self.bounds[i][0], self.bounds[i][1]
+                child1[i] = float(int(np.clip(round(child1[i]), yl, yu)))
+                child2[i] = float(int(np.clip(round(child2[i]), yl, yu)))
         
         return child1, child2
     
     def mutate(self, individual):
-        """Polynomial mutation for real-valued optimization"""
-        eta = 20.0  # Distribution index
+        """Hybrid mutation: polynomial for continuous features, random resetting for discrete features"""
+        eta = 20.0  # Distribution index for polynomial mutation
         mutated = individual.copy()
         
         for i in range(len(individual)):
             if np.random.random() <= self.mutation_rate:
-                y = individual[i]
                 yl, yu = self.bounds[i][0], self.bounds[i][1]
                 
                 if yl == yu:  # Fixed parameter
                     continue
                 
-                delta1 = (y - yl) / (yu - yl)
-                delta2 = (yu - y) / (yu - yl)
-                
-                rand = np.random.random()
-                mut_pow = 1.0 / (eta + 1.0)
-                
-                if rand <= 0.5:
-                    xy = 1.0 - delta1
-                    val = 2.0 * rand + (1.0 - 2.0 * rand) * (xy ** (eta + 1.0))
-                    deltaq = val ** mut_pow - 1.0
+                if self.feature_types[i] == 'continuous':
+                    # **CONTINUOUS FEATURE**: Use Polynomial Mutation
+                    # This preserves the sophisticated continuous search capabilities
+                    y = individual[i]
+                    
+                    delta1 = (y - yl) / (yu - yl)
+                    delta2 = (yu - y) / (yu - yl)
+                    
+                    rand = np.random.random()
+                    mut_pow = 1.0 / (eta + 1.0)
+                    
+                    if rand <= 0.5:
+                        xy = 1.0 - delta1
+                        val = 2.0 * rand + (1.0 - 2.0 * rand) * (xy ** (eta + 1.0))
+                        deltaq = val ** mut_pow - 1.0
+                    else:
+                        xy = 1.0 - delta2
+                        val = 2.0 * (1.0 - rand) + 2.0 * (rand - 0.5) * (xy ** (eta + 1.0))
+                        deltaq = 1.0 - val ** mut_pow
+                    
+                    y = y + deltaq * (yu - yl)
+                    mutated[i] = np.clip(y, yl, yu)
+                    
                 else:
-                    xy = 1.0 - delta2
-                    val = 2.0 * (1.0 - rand) + 2.0 * (rand - 0.5) * (xy ** (eta + 1.0))
-                    deltaq = 1.0 - val ** mut_pow
-                
-                y = y + deltaq * (yu - yl)
-                mutated[i] = np.clip(y, yl, yu)
+                    # **DISCRETE FEATURE**: Use Random Resetting Mutation
+                    # Randomly select a new valid discrete value
+                    current_value = int(round(individual[i]))
+                    possible_values = list(range(int(yl), int(yu) + 1))
+                    
+                    # Remove current value to ensure actual mutation
+                    if current_value in possible_values:
+                        possible_values.remove(current_value)
+                    
+                    # If there are other valid values, randomly select one
+                    if possible_values:
+                        new_value = np.random.choice(possible_values)
+                        mutated[i] = float(new_value)
+                    # If no other values available (e.g., binary with only 2 options), 
+                    # just flip to the other value
+                    elif len(range(int(yl), int(yu) + 1)) == 2:
+                        all_values = list(range(int(yl), int(yu) + 1))
+                        other_value = [v for v in all_values if v != current_value][0]
+                        mutated[i] = float(other_value)
         
         return mutated
     
@@ -322,13 +396,43 @@ class GeneticAlgorithm:
         # Final fallback - create a random individual within bounds
         if best_individual is None:
             best_individual = []
-            for min_val, max_val in self.bounds:
+            for i, (min_val, max_val) in enumerate(self.bounds):
                 if min_val == max_val:
                     best_individual.append(min_val)
-                else:
+                elif self.feature_types[i] == 'continuous':
                     best_individual.append(np.random.uniform(min_val, max_val))
+                else:
+                    # For categorical/integer features
+                    discrete_value = np.random.randint(int(min_val), int(max_val) + 1)
+                    best_individual.append(float(discrete_value))
             best_individual = np.array(best_individual)
             best_fitness = self.objective_func(best_individual)
+        
+        # **CRITICAL FIX**: Enforce bounds on final result to prevent boundary violations
+        if best_individual is not None:
+            for i in range(len(best_individual)):
+                if i < len(self.bounds):
+                    min_val, max_val = self.bounds[i]
+                    if self.feature_types[i] == 'continuous':
+                        # For continuous features: strict boundary clamping
+                        best_individual[i] = np.clip(best_individual[i], min_val, max_val)
+                    else:
+                        # For discrete features: round and clamp
+                        best_individual[i] = float(int(np.clip(round(best_individual[i]), min_val, max_val)))
+            
+            print(f"[GA FINAL] Final result bounds verification:")
+            print(f"[GA FINAL] Solution: {best_individual[:5]}...")
+            violations = []
+            for i, (value, (min_val, max_val)) in enumerate(zip(best_individual, self.bounds)):
+                if value < min_val or value > max_val:
+                    violations.append(f"Feature {i}: {value:.6f} not in [{min_val:.6f}, {max_val:.6f}]")
+            
+            if violations:
+                print(f"[GA FINAL] ERROR: Found {len(violations)} boundary violations:")
+                for violation in violations[:3]:  # Show first 3
+                    print(f"[GA FINAL]   {violation}")
+            else:
+                print(f"[GA FINAL] SUCCESS: All bounds satisfied")
         
         return {
             'x': best_individual,
@@ -341,7 +445,7 @@ class ParticleSwarmOptimization:
     """Enhanced Particle Swarm Optimization with real-time progress tracking"""
     
     def __init__(self, objective_func, bounds, n_particles=30, max_iterations=100,
-                 w=0.9, c1=2.0, c2=2.0, callback=None):
+                 w=0.9, c1=2.0, c2=2.0, callback=None, feature_types=None):
         self.objective_func = objective_func
         self.bounds = bounds
         self.n_particles = n_particles
@@ -353,6 +457,17 @@ class ParticleSwarmOptimization:
         self.dimension = len(bounds)
         self.should_stop = False
         
+        # **HYBRID PSO ENHANCEMENT**: Store feature types for mixed variable handling
+        if feature_types is None:
+            self.feature_types = ['continuous'] * self.dimension
+        else:
+            self.feature_types = feature_types
+            
+        # Count different feature types for debugging
+        continuous_count = sum(1 for ft in self.feature_types if ft == 'continuous')
+        categorical_count = sum(1 for ft in self.feature_types if ft in ['categorical', 'binary', 'integer'])
+        print(f"[HYBRID PSO] Initialized with {continuous_count} continuous and {categorical_count} discrete features")
+        
         # Real-time tracking
         self.iteration_history = []
         self.best_fitness_history = []
@@ -360,7 +475,7 @@ class ParticleSwarmOptimization:
         self.velocities_magnitude = []
         
     def initialize_swarm(self):
-        """Initialize particle swarm"""
+        """Initialize particle swarm with hybrid feature type support"""
         positions = []
         velocities = []
         
@@ -368,14 +483,21 @@ class ParticleSwarmOptimization:
             # Initialize position
             position = []
             velocity = []
-            for min_val, max_val in self.bounds:
+            for i, (min_val, max_val) in enumerate(self.bounds):
                 if min_val == max_val:
                     position.append(min_val)
                     velocity.append(0.0)
-                else:
+                elif self.feature_types[i] == 'continuous':
+                    # Continuous feature: use uniform distribution
                     position.append(np.random.uniform(min_val, max_val))
                     velocity.append(np.random.uniform(-(max_val - min_val) * 0.1, 
                                                     (max_val - min_val) * 0.1))
+                else:
+                    # Discrete feature: use discrete uniform selection
+                    discrete_value = np.random.randint(int(min_val), int(max_val) + 1)
+                    position.append(float(discrete_value))
+                    # For discrete features, use smaller velocity range
+                    velocity.append(np.random.uniform(-0.5, 0.5))
             positions.append(np.array(position))
             velocities.append(np.array(velocity))
         
@@ -418,15 +540,20 @@ class ParticleSwarmOptimization:
         return new_velocity
     
     def update_position(self, position, velocity):
-        """Update particle position with boundary handling"""
+        """Update particle position with hybrid feature type support"""
         new_position = position + velocity
         
-        # Boundary handling
+        # Boundary handling with feature type awareness
         for i, (min_val, max_val) in enumerate(self.bounds):
-            if new_position[i] < min_val:
-                new_position[i] = min_val
-            elif new_position[i] > max_val:
-                new_position[i] = max_val
+            if self.feature_types[i] == 'continuous':
+                # Continuous feature: standard boundary clamping
+                if new_position[i] < min_val:
+                    new_position[i] = min_val
+                elif new_position[i] > max_val:
+                    new_position[i] = max_val
+            else:
+                # Discrete feature: round to nearest integer and clamp
+                new_position[i] = float(int(np.clip(round(new_position[i]), min_val, max_val)))
         
         return new_position
     
@@ -1175,6 +1302,23 @@ class OptimizationWorker(QThread):
         # **CRITICAL FIX**: Determine model type once during initialization
         self.is_classifier = self._determine_model_type()
         
+        # **CRITICAL FIX FOR CATEGORICAL FEATURES**: Store mappings between optimizer values and original categorical values
+        # Format: {feature_name: {'orig_to_num': {original_val: numeric_val}, 'num_to_orig': {numeric_val: original_val}}}
+        self.categorical_mappings = {}
+        self._initialize_categorical_mappings()
+    
+    def _initialize_categorical_mappings(self):
+        """Initialize categorical mappings for all categorical features"""
+        for feature_name, bounds in self.bounds_dict.items():
+            if bounds.feature_type == "categorical":
+                self.categorical_mappings[feature_name] = {
+                    'orig_to_num': {},
+                    'num_to_orig': {}
+                }
+                for value in bounds.categorical_values:
+                    self.categorical_mappings[feature_name]['orig_to_num'][value] = len(self.categorical_mappings[feature_name]['orig_to_num'])
+                    self.categorical_mappings[feature_name]['num_to_orig'][len(self.categorical_mappings[feature_name]['num_to_orig'])] = value
+    
     def _determine_model_type(self):
         """
         Determine if the model is a classifier or regressor by checking the actual model,
@@ -1230,8 +1374,9 @@ class OptimizationWorker(QThread):
                     # This is critical for consistent constraint evaluation with categorical features
                     x_constrained = self._apply_categorical_constraints(x)
                     
-                    # Reshape for prediction
-                    x_pred = x_constrained.reshape(1, -1)
+                    # **CRITICAL FIX FOR CATEGORICAL FEATURES**: Convert numerical values back to original categorical values
+                    # Create a copy that will hold mixed types (numbers and original categorical values)
+                    x_for_model = self._convert_to_original_categories(x_constrained)
                     
                     # Setup debugging
                     if not hasattr(self, '_debug_call_count'):
@@ -1251,7 +1396,8 @@ class OptimizationWorker(QThread):
                                 if i < len(x_constrained) and feature_name in self.bounds_dict:
                                     bounds = self.bounds_dict[feature_name]
                                     if bounds and bounds.feature_type in ["categorical", "binary"]:
-                                        categorical_features.append(f"{feature_name}({i})={x_constrained[i]}")
+                                        orig_value = x_for_model[i] if i < len(x_for_model) else "unknown"
+                                        categorical_features.append(f"{feature_name}({i})={x_constrained[i]}->{orig_value}")
                             
                             if categorical_features:
                                 print(f"[OBJECTIVE] Categorical features: {', '.join(categorical_features)}")
@@ -1260,12 +1406,22 @@ class OptimizationWorker(QThread):
                     
                     # Use pre-determined model type for prediction
                     try:
+                        # Create a DataFrame with proper feature names and mixed types
+                        import pandas as pd
+                        x_df = pd.DataFrame([x_for_model], columns=self.feature_names)
+                        
+                        if debug_output:
+                            print(f"[OBJECTIVE] DataFrame for prediction: {x_df.dtypes.to_dict()}")
+                            for col in x_df.columns:
+                                if col in self.categorical_mappings:
+                                    print(f"[OBJECTIVE] Categorical column {col}: {x_df[col].values[0]}")
+                        
                         if self.is_classifier:
                             # Classification mode: use predict_proba
                             if debug_output:
                                 print(f"[OBJECTIVE] Using CLASSIFICATION mode (predict_proba)")
                             
-                            proba = self.model.predict_proba(x_pred)[0]
+                            proba = self.model.predict_proba(x_df)[0]
                             
                             # For binary classification, use probability of positive class (index 1)
                             if len(proba) == 2:
@@ -1282,7 +1438,7 @@ class OptimizationWorker(QThread):
                             if debug_output:
                                 print(f"[OBJECTIVE] Using REGRESSION mode (predict)")
                             
-                            prediction = self.model.predict(x_pred)[0]
+                            prediction = self.model.predict(x_df)[0]
                             if debug_output:
                                 print(f"[OBJECTIVE] Regression prediction: {prediction:.6f}")
                                 
@@ -1538,8 +1694,22 @@ class OptimizationWorker(QThread):
             self.pso_optimizer.should_stop = True
     
     def _genetic_algorithm(self, objective, bounds, callback):
-        """Enhanced Genetic Algorithm implementation"""
+        """Enhanced Genetic Algorithm implementation with hybrid feature type support"""
         config = self.config
+        
+        # **HYBRID GA ENHANCEMENT**: Extract feature types from bounds_dict
+        feature_types = []
+        for feature_name in self.feature_names:
+            if feature_name in self.bounds_dict:
+                bounds_obj = self.bounds_dict[feature_name]
+                if bounds_obj and hasattr(bounds_obj, 'feature_type'):
+                    feature_types.append(bounds_obj.feature_type)
+                else:
+                    feature_types.append('continuous')
+            else:
+                feature_types.append('continuous')
+        
+        print(f"[HYBRID GA] Feature types for optimization: {feature_types}")
         
         self.ga_optimizer = GeneticAlgorithm(
             objective_func=objective,
@@ -1549,7 +1719,8 @@ class OptimizationWorker(QThread):
             mutation_rate=config.get('mutation_rate', 0.1),
             crossover_rate=config.get('crossover_rate', 0.8),
             elite_size=config.get('elite_size', 5),
-            callback=callback
+            callback=callback,
+            feature_types=feature_types  # Pass feature types to hybrid GA
         )
         
         self.ga_optimizer.should_stop = False
@@ -1565,8 +1736,22 @@ class OptimizationWorker(QThread):
         return result
     
     def _particle_swarm_optimization(self, objective, bounds, callback):
-        """Enhanced Particle Swarm Optimization implementation"""
+        """Enhanced Particle Swarm Optimization implementation with hybrid feature type support"""
         config = self.config
+        
+        # **HYBRID PSO ENHANCEMENT**: Extract feature types from bounds_dict
+        feature_types = []
+        for feature_name in self.feature_names:
+            if feature_name in self.bounds_dict:
+                bounds_obj = self.bounds_dict[feature_name]
+                if bounds_obj and hasattr(bounds_obj, 'feature_type'):
+                    feature_types.append(bounds_obj.feature_type)
+                else:
+                    feature_types.append('continuous')
+            else:
+                feature_types.append('continuous')
+        
+        print(f"[HYBRID PSO] Feature types for optimization: {feature_types}")
         
         self.pso_optimizer = ParticleSwarmOptimization(
             objective_func=objective,
@@ -1576,7 +1761,8 @@ class OptimizationWorker(QThread):
             w=config.get('inertia_weight', 0.9),
             c1=config.get('cognitive_param', 2.0),
             c2=config.get('social_param', 2.0),
-            callback=callback
+            callback=callback,
+            feature_types=feature_types  # Pass feature types to hybrid PSO
         )
         
         self.pso_optimizer.should_stop = False
@@ -2311,6 +2497,8 @@ class OptimizationWorker(QThread):
             ordered_features = self.feature_names
             
         print(f"[DEBUG] Preparing bounds for {len(ordered_features)} features in strict order")
+        print(f"[DEBUG] Feature names order: {ordered_features}")
+        print(f"[DEBUG] Bounds dict keys: {list(self.bounds_dict.keys())}")
         
         # Process features in the exact order specified by ordered_features
         for i, feature_name in enumerate(ordered_features):
@@ -2333,6 +2521,7 @@ class OptimizationWorker(QThread):
                 elif bound_config.is_fixed:
                     fixed_val = bound_config.fixed_value
                     bounds.append((fixed_val, fixed_val))
+                    print(f"[DEBUG] Fixed bound {i}: {feature_name} = [{fixed_val}, {fixed_val}]")
                     if SKOPT_AVAILABLE:
                         # For fixed values, create a very small range to satisfy scikit-optimize
                         epsilon = max(1e-8, abs(fixed_val) * 1e-10) if fixed_val != 0 else 1e-8
@@ -2352,6 +2541,7 @@ class OptimizationWorker(QThread):
                         if min_val == max_val:
                             # Treat as fixed value
                             bounds.append((min_val, min_val))
+                            print(f"[DEBUG] Treated as fixed bound {i}: {feature_name} = [{min_val}, {min_val}]")
                             if SKOPT_AVAILABLE:
                                 epsilon = max(1e-8, abs(min_val) * 1e-10) if min_val != 0 else 1e-8
                                 try:
@@ -2362,10 +2552,12 @@ class OptimizationWorker(QThread):
                             # Swap bounds
                             min_val, max_val = max_val, min_val
                             bounds.append((min_val, max_val))
+                            print(f"[DEBUG] Swapped bound {i}: {feature_name} = [{min_val}, {max_val}]")
                             if SKOPT_AVAILABLE:
                                 space_config.append(Real(min_val, max_val, name=feature_name))
                     else:
                         bounds.append((min_val, max_val))
+                        print(f"[DEBUG] Normal bound {i}: {feature_name} = [{min_val}, {max_val}] (type: {bound_config.feature_type})")
                         
                         if SKOPT_AVAILABLE:
                             if bound_config.feature_type == "categorical":
@@ -2391,9 +2583,12 @@ class OptimizationWorker(QThread):
         if len(bounds) != len(ordered_features):
             print(f"[ERROR] Bounds length mismatch: {len(bounds)} bounds for {len(ordered_features)} features")
             
-        # Print first few bounds for debugging
-        for i, ((min_val, max_val), feature_name) in enumerate(zip(bounds[:5], ordered_features[:5])):
-            print(f"[DEBUG] Bound {i}: {feature_name} = [{min_val}, {max_val}]")
+        # Print comprehensive bounds summary
+        print(f"[DEBUG] ===== FINAL BOUNDS SUMMARY =====")
+        print(f"[DEBUG] Total bounds: {len(bounds)}")
+        for i, ((min_val, max_val), feature_name) in enumerate(zip(bounds, ordered_features)):
+            print(f"[DEBUG] [{i:2d}] {feature_name:20s} = [{min_val:10.6f}, {max_val:10.6f}]")
+        print(f"[DEBUG] =================================")
             
         return bounds, space_config
         
@@ -2712,6 +2907,56 @@ class OptimizationWorker(QThread):
         )
         
         return result
+
+    def _convert_to_original_categories(self, x_numeric):
+        """Convert numeric values from optimizer back to original categorical values for model prediction
+        
+        Args:
+            x_numeric: Numeric vector from optimizer with constrained categorical values
+            
+        Returns:
+            A list with mixed types - numbers for continuous features and original values for categorical features
+        """
+        # Make a copy that we'll modify
+        x_mixed = list(x_numeric)  # Convert to list to support mixed types
+        
+        # Only proceed if we have categorical mappings
+        if not self.categorical_mappings:
+            return x_mixed
+            
+        # For each feature, check if it's categorical and convert if needed
+        for i, feature_name in enumerate(self.feature_names):
+            if i >= len(x_mixed):
+                continue
+                
+            if feature_name in self.categorical_mappings:
+                # This is a categorical feature - convert numeric value back to original
+                numeric_value = int(round(x_mixed[i]))  # Round to nearest integer
+                
+                # Get mapping for this feature
+                mapping = self.categorical_mappings[feature_name]['num_to_orig']
+                
+                # Convert back to original value if possible
+                if numeric_value in mapping:
+                    x_mixed[i] = mapping[numeric_value]
+                    
+                    # Debug output for first few conversions
+                    if not hasattr(self, '_debug_conversion_count'):
+                        self._debug_conversion_count = 0
+                    
+                    self._debug_conversion_count += 1
+                    if self._debug_conversion_count <= 10:
+                        print(f"[CATEGORICAL] Converted {feature_name} from {numeric_value} to {x_mixed[i]}")
+                else:
+                    # If the numeric value is out of range, use the closest valid value
+                    valid_values = list(mapping.keys())
+                    if valid_values:
+                        closest_idx = min(range(len(valid_values)), key=lambda j: abs(valid_values[j] - numeric_value))
+                        closest_value = valid_values[closest_idx]
+                        x_mixed[i] = mapping[closest_value]
+                        print(f"[WARNING] Invalid categorical value {numeric_value} for {feature_name}, using closest: {x_mixed[i]}")
+        
+        return x_mixed
 
 class TargetOptimizationModule(QWidget):
     """Target Optimization Module"""
@@ -3038,6 +3283,10 @@ class TargetOptimizationModule(QWidget):
         self.model = trained_model
         self.training_data = training_data  # Store training data for reference
         
+        # **CRITICAL FIX**: Initialize storage for original categorical values
+        if not hasattr(self, 'original_categorical_values'):
+            self.original_categorical_values = {}
+        
         # **CRITICAL FIX**: Prioritize model's actual feature names over provided ones
         model_feature_names = None
         
@@ -3084,6 +3333,27 @@ class TargetOptimizationModule(QWidget):
             self.feature_names = [f"feature_{i}" for i in range(self._get_n_features())]
             print(f"[WARNING] Using generic feature names ({len(self.feature_names)} features)")
         
+        # **CRITICAL FIX**: Detect categorical features from training data
+        if training_data is not None and isinstance(training_data, pd.DataFrame):
+            print(f"[INFO] Analyzing training data for categorical features")
+            for feature_name in self.feature_names:
+                if feature_name in training_data.columns:
+                    col = training_data[feature_name]
+                    
+                    # Case 1: Non-numeric data (object or category dtype)
+                    if col.dtype == 'object' or col.dtype.name == 'category':
+                        original_values = col.unique().tolist()
+                        print(f"[CATEGORICAL] Detected non-numeric feature {feature_name} with values: {original_values}")
+                        self.original_categorical_values[feature_name] = original_values
+                    
+                    # Case 2: Numeric data with few unique values (likely categorical)
+                    elif len(col.unique()) <= 10:  # Threshold for considering numeric as categorical
+                        unique_values = sorted(col.unique().tolist())
+                        # Check if values are integers or close to integers
+                        if all(abs(val - round(val)) < 1e-6 for val in unique_values):
+                            print(f"[CATEGORICAL] Detected numeric categorical feature {feature_name} with values: {unique_values}")
+                            self.original_categorical_values[feature_name] = unique_values
+        
         # Detect feature types from feature names and info
         self._detect_feature_types(feature_info)
         
@@ -3098,6 +3368,14 @@ class TargetOptimizationModule(QWidget):
             print(f"[INFO] - Model type: {type(self.model)}")
             print(f"[INFO] - Feature count: {len(self.feature_names)}")
             print(f"[INFO] - First few features: {self.feature_names[:5]}")
+            
+            # **CRITICAL FIX**: Print categorical feature information
+            categorical_features = [f for f in self.original_categorical_values.keys()]
+            if categorical_features:
+                print(f"[INFO] - Detected {len(categorical_features)} categorical features: {categorical_features}")
+                for feature in categorical_features:
+                    print(f"[INFO]   * {feature}: {self.original_categorical_values[feature]}")
+            
             if hasattr(self.model, 'feature_names_in_'):
                 expected_features = list(self.model.feature_names_in_)
                 if set(self.feature_names) == set(expected_features):
@@ -3282,21 +3560,34 @@ class TargetOptimizationModule(QWidget):
         """Enhanced get feature bounds from table with type support"""
         bounds = {}
         
-        try:
-            for i in range(self.bounds_table.rowCount()):
+        print(f"[GET_BOUNDS] Reading bounds from table with {self.bounds_table.rowCount()} rows")
+        
+        # **CRITICAL FIX**: Process each row individually with error isolation
+        for i in range(self.bounds_table.rowCount()):
+            try:
                 # Get feature name
                 feature_item = self.bounds_table.item(i, 0)
                 if feature_item is None:
                     continue
                 feature = feature_item.text()
                 
-                # Get min value
+                # Get min value - handle categorical features safely
                 min_item = self.bounds_table.item(i, 1)
-                min_val = float(min_item.text()) if min_item and min_item.text() else 0.0
+                min_text = min_item.text() if min_item else ""
+                try:
+                    min_val = float(min_text) if min_text and min_text.strip() else 0.0
+                except (ValueError, TypeError):
+                    print(f"[GET_BOUNDS] Warning: Invalid min value '{min_text}' for {feature}, using 0.0")
+                    min_val = 0.0
                 
-                # Get max value
+                # Get max value - handle categorical features safely  
                 max_item = self.bounds_table.item(i, 2)
-                max_val = float(max_item.text()) if max_item and max_item.text() else 1.0
+                max_text = max_item.text() if max_item else ""
+                try:
+                    max_val = float(max_text) if max_text and max_text.strip() else 1.0
+                except (ValueError, TypeError):
+                    print(f"[GET_BOUNDS] Warning: Invalid max value '{max_text}' for {feature}, using 1.0")
+                    max_val = 1.0
                 
                 # Get fixed checkbox
                 fixed_widget = self.bounds_table.cellWidget(i, 3)
@@ -3307,11 +3598,13 @@ class TargetOptimizationModule(QWidget):
                 feature_type = feature_info['type']
                 categorical_values = feature_info['categorical_values']
                 
-                # Fix for fixed values: use the actual fixed value from min_val
+                print(f"[GET_BOUNDS] Row {i}: {feature} = [{min_val}, {max_val}], fixed={is_fixed}, type={feature_type}")
+                print(f"[GET_BOUNDS]   Raw table values: min_text='{min_text}', max_text='{max_text}'")
+                
+                # Handle fixed values
                 if is_fixed:
-                    # For fixed values, use min_val as the fixed value and set both bounds to it
                     fixed_val = min_val
-                    print(f"[DEBUG] Setting fixed value for {feature}: {fixed_val}")
+                    print(f"[GET_BOUNDS] Setting fixed value for {feature}: {fixed_val}")
                     bounds[feature] = FeatureBounds(
                         min_value=fixed_val,
                         max_value=fixed_val,
@@ -3321,10 +3614,25 @@ class TargetOptimizationModule(QWidget):
                         categorical_values=categorical_values
                     )
                 else:
-                    # Ensure min_val < max_val for non-fixed features
-                    if min_val >= max_val:
-                        print(f"[WARNING] Invalid bounds for {feature}: min={min_val}, max={max_val}. Swapping values.")
-                        min_val, max_val = max(0.0, min(min_val, max_val)), max(min_val, max_val, 1.0)
+                    # Handle categorical features specially
+                    if feature_type == 'categorical':
+                        print(f"[GET_BOUNDS] Processing categorical feature {feature}")
+                        # For categorical features, bounds should be [0, n-1] where n is number of categories
+                        if categorical_values and len(categorical_values) > 0:
+                            min_val = 0
+                            max_val = len(categorical_values) - 1
+                        else:
+                            min_val = 0
+                            max_val = 1  # Binary categorical default
+                        print(f"[GET_BOUNDS] Categorical bounds for {feature}: [{min_val}, {max_val}]")
+                    else:
+                        # For continuous features, ensure valid bounds
+                        if min_val >= max_val:
+                            print(f"[GET_BOUNDS] Invalid bounds for {feature}: min={min_val}, max={max_val}, swapping")
+                            if min_val == max_val:
+                                max_val = min_val + 0.001
+                            else:
+                                min_val, max_val = max_val, min_val
                     
                     bounds[feature] = FeatureBounds(
                         min_value=min_val,
@@ -3334,12 +3642,28 @@ class TargetOptimizationModule(QWidget):
                         feature_type=feature_type,
                         categorical_values=categorical_values
                     )
+                    
+                    print(f"[GET_BOUNDS] Final bounds for {feature}: [{min_val}, {max_val}]")
                 
-        except Exception as e:
-            print(f"Error getting feature bounds: {e}")
-            # Return default bounds if there's an error
-            if self.feature_names:
-                for feature in self.feature_names:
+            except Exception as e:
+                print(f"[GET_BOUNDS] Error processing row {i} (feature: {feature if 'feature' in locals() else 'unknown'}): {e}")
+                # Continue with next row instead of failing completely
+                if 'feature' in locals() and feature:
+                    # Add default bounds for this feature
+                    bounds[feature] = FeatureBounds(
+                        min_value=0.0,
+                        max_value=1.0,
+                        is_fixed=False,
+                        feature_type='continuous',
+                        categorical_values=None
+                    )
+                continue
+        
+        # Ensure all features have bounds
+        if self.feature_names:
+            for feature in self.feature_names:
+                if feature not in bounds:
+                    print(f"[GET_BOUNDS] Missing bounds for {feature}, adding default")
                     feature_info = self.feature_types.get(feature, {'type': 'continuous', 'categorical_values': None})
                     bounds[feature] = FeatureBounds(
                         min_value=0.0,
@@ -3720,6 +4044,21 @@ class TargetOptimizationModule(QWidget):
             for i, feature_name in enumerate(self.feature_names):
                 print(f"  {i}: {feature_name}")
                 
+            # **CRITICAL FIX**: Log categorical features and their original values
+            if hasattr(self, 'original_categorical_values') and self.original_categorical_values:
+                print("\n[OPTIMIZATION START] Categorical features:")
+                for feature_name, original_values in self.original_categorical_values.items():
+                    if feature_name in self.feature_names:
+                        idx = self.feature_names.index(feature_name)
+                        print(f"  {idx}: {feature_name} - Original values: {original_values}")
+                        
+                        # Update feature type in bounds if needed
+                        if feature_name in bounds:
+                            bounds[feature_name].feature_type = "categorical"
+                            # Set categorical_values to numeric range (0 to n-1)
+                            bounds[feature_name].categorical_values = list(range(len(original_values)))
+                            print(f"    Optimizer will use values: {bounds[feature_name].categorical_values}")
+                
             print("\n[OPTIMIZATION START] Constraints:")
             for i, constraint in enumerate(self.constraints):
                 feature_indices = constraint.feature_indices
@@ -3731,11 +4070,35 @@ class TargetOptimizationModule(QWidget):
             # Reset real-time history
             self.real_time_history = []
             
+            # **DEBUG**: Print bounds before passing to worker
+            print(f"\n[START_OPT] Bounds being passed to worker:")
+            for feature_name, bound_obj in bounds.items():
+                print(f"[START_OPT]   {feature_name}: [{bound_obj.min_value}, {bound_obj.max_value}] (type: {bound_obj.feature_type})")
+            
             # Create and start worker thread
             self.worker = OptimizationWorker(
                 self.model, bounds, self.constraints, 
                 algorithm, config, target_direction, self.feature_names
             )
+            
+            # **CRITICAL FIX**: Pass original categorical values to worker
+            if hasattr(self, 'original_categorical_values') and self.original_categorical_values:
+                # Initialize categorical mappings in the worker
+                for feature_name, original_values in self.original_categorical_values.items():
+                    if feature_name in self.feature_names and feature_name in bounds:
+                        # Create mapping between original values and optimizer's numeric values
+                        if feature_name not in self.worker.categorical_mappings:
+                            self.worker.categorical_mappings[feature_name] = {
+                                'orig_to_num': {},
+                                'num_to_orig': {}
+                            }
+                            
+                        # Fill the mappings
+                        for i, orig_value in enumerate(original_values):
+                            self.worker.categorical_mappings[feature_name]['orig_to_num'][orig_value] = i
+                            self.worker.categorical_mappings[feature_name]['num_to_orig'][i] = orig_value
+                            
+                        print(f"[CATEGORICAL] Created mapping for {feature_name}: {self.worker.categorical_mappings[feature_name]['num_to_orig']}")
             
             # Connect signals
             self.worker.progress_updated.connect(self.progress_bar.setValue)
@@ -3861,6 +4224,12 @@ class TargetOptimizationModule(QWidget):
             except Exception:
                 pass  # UI state errors are non-critical
             
+            # **BOUNDS VERIFICATION**: Check if results violate bounds
+            try:
+                self._verify_results_bounds(results)
+            except Exception as e:
+                print(f"Warning: Bounds verification failed: {e}")
+
             # **SAFE RESULT DISPLAY**: Wrap in try-catch to prevent crashes
             try:
                 self.display_results(results)
@@ -4186,6 +4555,78 @@ Performance Metrics:
                 self.canvas.draw()
             except Exception:
                 pass  # If even this fails, give up on visualization
+
+    def _verify_results_bounds(self, results):
+        """Verify that optimization results satisfy feature bounds"""
+        try:
+            best_params = results.get('best_params', {})
+            if not isinstance(best_params, dict) or not best_params:
+                print("[BOUNDS_CHECK] No parameters to verify")
+                return
+                
+            # **CRITICAL**: Get FRESH bounds from UI to ensure we use the real bounds, not cached ones
+            try:
+                # Read bounds directly from the interface table
+                ui_bounds = {}
+                for i in range(self.bounds_table.rowCount()):
+                    feature_item = self.bounds_table.item(i, 0)
+                    if feature_item is None:
+                        continue
+                    feature = feature_item.text()
+                    
+                    min_item = self.bounds_table.item(i, 1)
+                    max_item = self.bounds_table.item(i, 2)
+                    
+                    try:
+                        min_val = float(min_item.text()) if min_item and min_item.text() else 0.0
+                        max_val = float(max_item.text()) if max_item and max_item.text() else 1.0
+                        ui_bounds[feature] = (min_val, max_val)
+                        print(f"[BOUNDS_CHECK] UI bounds for {feature}: [{min_val}, {max_val}]")
+                    except (ValueError, TypeError):
+                        # For categorical features, use [0, 1] bounds
+                        ui_bounds[feature] = (0.0, 1.0)
+                        print(f"[BOUNDS_CHECK] UI bounds for {feature}: [0.0, 1.0] (categorical/default)")
+                        
+                current_bounds = ui_bounds
+            except Exception as e:
+                print(f"[BOUNDS_CHECK] Error reading UI bounds: {e}")
+                # Fallback to get_feature_bounds
+                current_bounds_obj = self.get_feature_bounds()
+                current_bounds = {name: (bounds.min_value, bounds.max_value) 
+                                for name, bounds in current_bounds_obj.items()}
+            
+            print(f"\n[BOUNDS_CHECK] ===== FINAL BOUNDS VERIFICATION =====")
+            print(f"[BOUNDS_CHECK] Checking {len(best_params)} optimized parameters")
+            
+            violations = []
+            for feature_name, optimized_value in best_params.items():
+                if feature_name in current_bounds:
+                    min_val, max_val = current_bounds[feature_name]
+                    
+                    # Check bounds violation
+                    if optimized_value < min_val or optimized_value > max_val:
+                        violation_msg = f"{feature_name}: {optimized_value:.6f} NOT in [{min_val:.6f}, {max_val:.6f}]"
+                        violations.append(violation_msg)
+                        print(f"[BOUNDS_CHECK] ❌ {violation_msg}")
+                    else:
+                        print(f"[BOUNDS_CHECK] ✅ {feature_name}: {optimized_value:.6f} in [{min_val:.6f}, {max_val:.6f}]")
+                else:
+                    print(f"[BOUNDS_CHECK] ⚠️  {feature_name}: No bounds definition found")
+            
+            if violations:
+                print(f"[BOUNDS_CHECK] 🚨 CRITICAL: Found {len(violations)} bounds violations!")
+                print("[BOUNDS_CHECK] This indicates a serious problem in the optimization algorithm!")
+                for i, violation in enumerate(violations[:5]):  # Show first 5 violations
+                    print(f"[BOUNDS_CHECK]   {i+1}. {violation}")
+                if len(violations) > 5:
+                    print(f"[BOUNDS_CHECK]   ... and {len(violations)-5} more violations")
+            else:
+                print(f"[BOUNDS_CHECK] ✅ SUCCESS: All {len(best_params)} parameters satisfy bounds")
+                
+            print(f"[BOUNDS_CHECK] ==========================================\n")
+            
+        except Exception as e:
+            print(f"[BOUNDS_CHECK] ERROR during verification: {e}")
 
     def reset(self):
         """Reset the module with enhanced cleanup"""
