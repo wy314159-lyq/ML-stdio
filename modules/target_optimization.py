@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                            QDoubleSpinBox, QCheckBox, QTableWidget, QTableWidgetItem,
                            QTextEdit, QProgressBar, QSplitter, QGroupBox, QTabWidget,
                            QScrollArea, QFrame, QMessageBox, QFileDialog,
-                           QFormLayout, QSlider)
+                           QFormLayout, QSlider, QStackedWidget)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPixmap
 
@@ -1220,109 +1220,146 @@ class OptimizationWorker(QThread):
             bounds, space_config = self._prepare_bounds_and_space()
             
             def objective(x):
-                """Enhanced objective function with proper task detection and debugging"""
+                """Enhanced objective function with robust categorical handling and constraint enforcement"""
                 try:
                     # Convert to array if needed
                     if hasattr(x, '__iter__') and not isinstance(x, np.ndarray):
                         x = np.array(x)
                     
-                    # Apply categorical rounding
-                    x = self._apply_categorical_constraints(x)
+                    # Apply categorical constraints FIRST to ensure all evaluations use valid discrete values
+                    # This is critical for consistent constraint evaluation with categorical features
+                    x_constrained = self._apply_categorical_constraints(x)
                     
                     # Reshape for prediction
-                    x_pred = x.reshape(1, -1)
+                    x_pred = x_constrained.reshape(1, -1)
                     
-                    # **DEBUG**: Print optimization details (first few calls only)
+                    # Setup debugging
                     if not hasattr(self, '_debug_call_count'):
                         self._debug_call_count = 0
                     self._debug_call_count += 1
                     
-                    if self._debug_call_count <= 3:  # Only print first 3 calls
-                        print(f"[DEBUG] Optimization call #{self._debug_call_count}")
-                        print(f"[DEBUG] Input parameters: {x[:5]}...")  # Show first 5 values
-                        print(f"[DEBUG] Model type: {type(self.model)}")
-                        
-                        # Check what's inside the model if it's a Pipeline
-                        if hasattr(self.model, 'named_steps'):
-                            final_estimator = None
-                            for step_name, step in self.model.named_steps.items():
-                                print(f"[DEBUG] Pipeline step '{step_name}': {type(step)}")
-                                if step_name not in ['preprocessor', 'scaler', 'imputer']:
-                                    final_estimator = step
-                            if final_estimator:
-                                print(f"[DEBUG] Final estimator type: {type(final_estimator)}")
-                                # Check if it's a classifier or regressor
-                                is_classifier = hasattr(final_estimator, 'predict_proba')
-                                print(f"[DEBUG] Is classifier (has predict_proba): {is_classifier}")
+                    debug_output = self._debug_call_count <= 5  # Show more debug info for first 5 calls
                     
-                    # **CRITICAL FIX**: Use pre-determined model type for clear, efficient prediction
+                    if debug_output:
+                        print(f"\n[OBJECTIVE] Call #{self._debug_call_count}")
+                        print(f"[OBJECTIVE] Input parameters: {x_constrained[:5]}...")
+                        
+                        # Check for categorical features and highlight them
+                        if hasattr(self, 'bounds_dict') and self.feature_names:
+                            categorical_features = []
+                            for i, feature_name in enumerate(self.feature_names[:10]):  # First 10 features
+                                if i < len(x_constrained) and feature_name in self.bounds_dict:
+                                    bounds = self.bounds_dict[feature_name]
+                                    if bounds and bounds.feature_type in ["categorical", "binary"]:
+                                        categorical_features.append(f"{feature_name}({i})={x_constrained[i]}")
+                            
+                            if categorical_features:
+                                print(f"[OBJECTIVE] Categorical features: {', '.join(categorical_features)}")
+                        
+                        print(f"[OBJECTIVE] Model type: {type(self.model)}")
+                    
+                    # Use pre-determined model type for prediction
                     try:
                         if self.is_classifier:
                             # Classification mode: use predict_proba
-                            if self._debug_call_count <= 3:
-                                print(f"[DEBUG] Using CLASSIFICATION mode (predict_proba)")
+                            if debug_output:
+                                print(f"[OBJECTIVE] Using CLASSIFICATION mode (predict_proba)")
                             
                             proba = self.model.predict_proba(x_pred)[0]
-                            if self._debug_call_count <= 3:
-                                print(f"[DEBUG] Prediction probabilities: {proba}")
                             
                             # For binary classification, use probability of positive class (index 1)
                             if len(proba) == 2:
                                 prediction = proba[1]  # Probability of class 1
-                                if self._debug_call_count <= 3:
-                                    print(f"[DEBUG] Using class 1 probability: {prediction}")
+                                if debug_output:
+                                    print(f"[OBJECTIVE] Binary classification: positive class probability = {prediction:.6f}")
                             else:
-                                # Multi-class: use max probability or entropy
+                                # Multi-class: use max probability
                                 prediction = np.max(proba)
-                                if self._debug_call_count <= 3:
-                                    print(f"[DEBUG] Using max probability: {prediction}")
+                                if debug_output:
+                                    print(f"[OBJECTIVE] Multi-class: max probability = {prediction:.6f}")
                         else:
                             # Regression mode: use predict
-                            if self._debug_call_count <= 3:
-                                print(f"[DEBUG] Using REGRESSION mode (predict)")
+                            if debug_output:
+                                print(f"[OBJECTIVE] Using REGRESSION mode (predict)")
                             
                             prediction = self.model.predict(x_pred)[0]
-                            if self._debug_call_count <= 3:
-                                print(f"[DEBUG] Regression prediction: {prediction}")
+                            if debug_output:
+                                print(f"[OBJECTIVE] Regression prediction: {prediction:.6f}")
                                 
                     except Exception as pred_error:
-                        if self._debug_call_count <= 3:
-                            print(f"[DEBUG] Model prediction failed: {pred_error}")
-                        # Enhanced error handling for thread conflicts
-                        return float('inf')
+                        print(f"[OBJECTIVE ERROR] Model prediction failed: {str(pred_error)}")
+                        traceback.print_exc()
+                        return float('inf') if self.target_direction == "minimize" else -float('inf')
                     
-                    # For non-COBYLA algorithms, still apply penalty method as fallback
-                    if self.algorithm != "COBYLA" and hasattr(self, 'constraints') and self.constraints:
-                        constraint_penalty = self._evaluate_constraints(x)
+                    # Store current prediction for adaptive constraint scaling
+                    self.last_objective_value = prediction
+                    
+                    # Update objective scale estimate for constraint penalties
+                    if not self.config.get('objective_scale_estimate'):
+                        self.config['objective_scale_estimate'] = abs(prediction)
+                    else:
+                        # Exponential moving average for scale estimate
+                        current = self.config['objective_scale_estimate']
+                        self.config['objective_scale_estimate'] = 0.9 * current + 0.1 * abs(prediction)
+                    
+                    if debug_output:
+                        print(f"[OBJECTIVE] Raw prediction: {prediction:.6f}")
+                        print(f"[OBJECTIVE] Objective scale estimate: {self.config['objective_scale_estimate']:.6f}")
+                    
+                    # For COBYLA with explicit constraints, return raw objective
+                    # COBYLA handles constraints through separate constraint functions
+                    if self.algorithm == "COBYLA" and hasattr(self, 'constraints') and self.constraints:
+                        final_objective = -prediction if self.target_direction == "maximize" else prediction
+                        
+                        if debug_output:
+                            print(f"[OBJECTIVE] COBYLA objective (constraints handled separately): {final_objective:.6f}")
+                            
+                        return final_objective
+                    
+                    # For non-COBYLA algorithms, apply penalty method with enhanced scaling
+                    if hasattr(self, 'constraints') and self.constraints:
+                        # Evaluate constraints on the constrained vector (critical for categorical features)
+                        constraint_penalty = self._evaluate_constraints(x_constrained)
+                        
                         if constraint_penalty > 0:
                             self.constraint_violations += 1
-                            # CRITICAL FIX: Apply penalty correctly based on optimization direction
-                            # For maximization, we need to subtract the penalty (since we negate later)
-                            # For minimization, we add the penalty
-                            if self.target_direction == "maximize":
-                                prediction -= constraint_penalty
-                            else:
-                                prediction += constraint_penalty
                             
-                            if self._debug_call_count <= 3:
-                                print(f"[DEBUG] Added enhanced constraint penalty: {constraint_penalty}")
-                                print(f"[DEBUG] Direction: {self.target_direction}, Adjusted prediction: {prediction}")
+                            # Apply penalty correctly based on optimization direction
+                            if self.target_direction == "maximize":
+                                # For maximization, we need to make the objective worse (more negative)
+                                # So we subtract the penalty from the prediction
+                                adjusted_prediction = prediction - constraint_penalty
+                            else:
+                                # For minimization, we need to make the objective worse (more positive)
+                                # So we add the penalty to the prediction
+                                adjusted_prediction = prediction + constraint_penalty
+                                
+                            if debug_output:
+                                print(f"[OBJECTIVE] Constraint penalty: {constraint_penalty:.6f}")
+                                print(f"[OBJECTIVE] Prediction adjusted from {prediction:.6f} to {adjusted_prediction:.6f}")
+                                
+                            prediction = adjusted_prediction
                     
                     # Return negative for maximization (scipy minimizes)
                     final_objective = -prediction if self.target_direction == "maximize" else prediction
                     
-                    if self._debug_call_count <= 3:
-                        print(f"[DEBUG] Target direction: {self.target_direction}")
-                        print(f"[DEBUG] Final objective value: {final_objective}")
-                        print("=" * 50)
+                    # Store for debugging
+                    if not hasattr(self, 'last_objective'):
+                        self.last_objective = []
+                    self.last_objective.append(final_objective)
                     
+                    if debug_output:
+                        print(f"[OBJECTIVE] Final objective: {final_objective:.6f}")
+                        print(f"[OBJECTIVE] Target direction: {self.target_direction}")
+                        print("=" * 50)
+                        
                     return final_objective
                     
                 except Exception as e:
-                    if self._debug_call_count <= 3:
-                        print(f"[DEBUG] Objective function error: {e}")
-                    # Silently handle any errors to prevent crashes
-                    return float('inf')
+                    print(f"[OBJECTIVE ERROR] Objective function error: {str(e)}")
+                    traceback.print_exc()
+                    # Return a large value for minimization, small for maximization
+                    return float('inf') if self.target_direction == "minimize" else -float('inf')
             
             # Enhanced callback for real-time updates with reduced frequency
             def optimization_callback(iteration, best_value, best_params, extra_data=None):
@@ -1556,119 +1593,479 @@ class OptimizationWorker(QThread):
         return result
 
     def _apply_categorical_constraints(self, x):
-        """Apply categorical and integer constraints to parameter vector"""
+        """Apply categorical and integer constraints to parameter vector with enhanced debugging
+        
+        CRITICAL FIX: Use self.feature_names as the authoritative source of feature order
+        rather than relying on dictionary iteration order which is not guaranteed to be consistent.
+        """
         x_constrained = x.copy()
         
         # Only apply constraints if we have bounds_dict and feature types are properly set
         if not hasattr(self, 'bounds_dict') or not self.bounds_dict:
             return x_constrained
-        
-        for i, (feature_name, bounds) in enumerate(self.bounds_dict.items()):
-            if i >= len(x_constrained):
-                break
             
-            # Skip if bounds is None or feature_type is not explicitly set to categorical/binary
+        # Only apply constraints if we have feature names
+        if not self.feature_names:
+            print("[WARNING] No feature_names available for categorical constraints")
+            return x_constrained
+        
+        # Debug output for first few calls
+        if not hasattr(self, '_categorical_debug_count'):
+            self._categorical_debug_count = 0
+        self._categorical_debug_count += 1
+        
+        debug_output = self._categorical_debug_count <= 3
+        
+        if debug_output:
+            print(f"\n[CATEGORICAL] Processing vector of length {len(x_constrained)}")
+            print(f"[CATEGORICAL] Feature bounds dictionary has {len(self.bounds_dict)} entries")
+            print(f"[CATEGORICAL] Using {len(self.feature_names)} feature names as authoritative order")
+            
+            # Print feature mapping for debugging
+            print("[CATEGORICAL] Feature index mapping:")
+            for i, feature_name in enumerate(self.feature_names):
+                if i < len(x_constrained):
+                    bounds = self.bounds_dict.get(feature_name)
+                    print(f"   {i}: {feature_name} -> {bounds.feature_type if bounds else 'None'}")
+        
+        # Track changes for debugging
+        changes_made = []
+        
+        # CRITICAL FIX: Process features in the exact order specified by self.feature_names
+        for i, feature_name in enumerate(self.feature_names):
+            # Skip if index out of bounds
+            if i >= len(x_constrained):
+                if debug_output:
+                    print(f"[CATEGORICAL WARNING] Feature index {i} ({feature_name}) is out of bounds for vector of length {len(x_constrained)}")
+                continue
+                
+            # Skip if feature not in bounds_dict
+            if feature_name not in self.bounds_dict:
+                if debug_output:
+                    print(f"[CATEGORICAL WARNING] Feature {feature_name} not found in bounds_dict")
+                continue
+                
+            # Get bounds for this feature
+            bounds = self.bounds_dict[feature_name]
             if bounds is None:
                 continue
                 
-            # Only apply categorical constraints if explicitly marked as categorical or binary
-            # This prevents continuous features from being rounded to 0/1
+            original_value = x_constrained[i]
+            
+            # Apply constraints based on feature type with improved handling
             if bounds.feature_type == "categorical" and bounds.categorical_values:
-                # Round to nearest categorical value
-                distances = [abs(x_constrained[i] - val) for val in bounds.categorical_values]
-                closest_idx = np.argmin(distances)
-                x_constrained[i] = bounds.categorical_values[closest_idx]
-            elif bounds.feature_type == "binary" and bounds.categorical_values:
-                # Round to nearest binary value (0 or 1)
-                distances = [abs(x_constrained[i] - val) for val in bounds.categorical_values]
-                closest_idx = np.argmin(distances)
-                x_constrained[i] = bounds.categorical_values[closest_idx]
-            elif bounds.feature_type == "integer":
-                # Round to nearest integer
-                x_constrained[i] = round(x_constrained[i])
-            # For continuous features, do nothing - leave values as-is
+                # For categorical features, find the closest allowed value
+                if len(bounds.categorical_values) > 0:
+                    distances = [abs(original_value - val) for val in bounds.categorical_values]
+                    closest_idx = np.argmin(distances)
+                    x_constrained[i] = bounds.categorical_values[closest_idx]
+                    
+                    if debug_output:
+                        changes_made.append(f"Feature {i} ({feature_name}): {original_value:.4f} -> {x_constrained[i]:.4f} (categorical)")
                 
+            elif bounds.feature_type == "binary":
+                # For binary features, use strict threshold at 0.5
+                if original_value >= 0.5:
+                    x_constrained[i] = 1.0
+                else:
+                    x_constrained[i] = 0.0
+                
+                if debug_output and x_constrained[i] != original_value:
+                    changes_made.append(f"Feature {i} ({feature_name}): {original_value:.4f} -> {x_constrained[i]:.4f} (binary)")
+                    
+            elif bounds.feature_type == "integer":
+                # For integer features, round to nearest integer and ensure within bounds
+                rounded_val = round(original_value)
+                
+                # Ensure within integer bounds if specified
+                if hasattr(bounds, 'min_value') and hasattr(bounds, 'max_value'):
+                    min_val = int(bounds.min_value)
+                    max_val = int(bounds.max_value)
+                    rounded_val = max(min_val, min(rounded_val, max_val))
+                
+                x_constrained[i] = rounded_val
+                
+                if debug_output and x_constrained[i] != original_value:
+                    changes_made.append(f"Feature {i} ({feature_name}): {original_value:.4f} -> {x_constrained[i]:.4f} (integer)")
+        
+        # Print summary of changes for debugging
+        if debug_output:
+            if changes_made:
+                print("[CATEGORICAL] Changes applied:")
+                for change in changes_made:
+                    print(f"   {change}")
+                print(f"[CATEGORICAL] Total: {len(changes_made)} changes out of {len(x_constrained)} features")
+            else:
+                print("[CATEGORICAL] No changes needed - all features already satisfy type constraints")
+            
         return x_constrained
     
     def _evaluate_constraints(self, x):
-        """Enhanced constraint evaluation with adaptive penalty scaling"""
+        """Enhanced constraint evaluation with robust feature mapping and extreme penalties"""
         if not self.constraints:
             return 0.0
             
         total_penalty = 0.0
+        violations_count = 0
         
-        for constraint in self.constraints:
+        # Debug flag for detailed output
+        debug_output = not hasattr(self, '_constraints_debug_count') or self._constraints_debug_count < 5
+        if not hasattr(self, '_constraints_debug_count'):
+            self._constraints_debug_count = 0
+        self._constraints_debug_count += 1
+        
+        # First, apply categorical constraints to ensure we're evaluating with proper values
+        # This is critical for categorical features to ensure constraints are evaluated on valid values
+        x_constrained = self._apply_categorical_constraints(x)
+        
+        # Create robust bidirectional feature name-index mappings
+        feature_index_to_name = {}
+        feature_name_to_index = {}
+        
+        if self.feature_names:
+            for i, name in enumerate(self.feature_names):
+                if i < len(x_constrained):  # Only map features within vector length
+                    feature_index_to_name[i] = name
+                    feature_name_to_index[name] = i
+        
+        # Get feature types for better debugging
+        feature_types = {}
+        if hasattr(self, 'bounds_dict') and self.bounds_dict:
+            for feature_name, bounds in self.bounds_dict.items():
+                if bounds and hasattr(bounds, 'feature_type'):
+                    feature_types[feature_name] = bounds.feature_type
+        
+        # Print feature mapping once for debugging
+        if debug_output:
+            print(f"\n[CONSTRAINT] Evaluating {len(self.constraints)} constraints on vector of length {len(x_constrained)}")
+            print(f"[CONSTRAINT] Feature mapping sample (first 5 features):")
+            for i, name in list(feature_index_to_name.items())[:5]:
+                feature_type = feature_types.get(name, "unknown")
+                print(f"   - Index {i}: {name} ({feature_type})")
+        
+        # Track all violations for detailed reporting
+        all_violations = []
+        
+        # Process each constraint
+        for i, constraint in enumerate(self.constraints):
             try:
-                # Calculate constraint value
+                # Calculate constraint value with improved feature mapping
                 constraint_value = 0.0
-                for idx, coeff in zip(constraint.feature_indices, constraint.coefficients):
-                    if idx < len(x):
-                        constraint_value += coeff * x[idx]
+                feature_values = []
+                invalid_indices = []
                 
-                # Check constraint violation with adaptive penalty
+                # Verify all indices are valid before proceeding
+                for idx in constraint.feature_indices:
+                    if idx >= len(x_constrained):
+                        invalid_indices.append(idx)
+                
+                if invalid_indices:
+                    print(f"[CONSTRAINT ERROR] Constraint {i+1} ({constraint.description}) references invalid feature indices: {invalid_indices}")
+                    print(f"[CONSTRAINT ERROR] Vector length is {len(x_constrained)}, but constraint uses indices up to {max(constraint.feature_indices)}")
+                    # Add extreme penalty for invalid constraints
+                    total_penalty += 100000.0
+                    violations_count += 1
+                    continue
+                
+                # Calculate constraint value using constrained feature values
+                for idx, coeff in zip(constraint.feature_indices, constraint.coefficients):
+                    feature_value = x_constrained[idx]  # Use constrained values
+                    constraint_value += coeff * feature_value
+                    
+                    # Get feature name and type for better debugging
+                    feature_name = feature_index_to_name.get(idx, f"unknown_{idx}")
+                    feature_type = feature_types.get(feature_name, "unknown")
+                    
+                    # Store for detailed debugging
+                    feature_values.append((idx, feature_name, feature_type, feature_value, coeff))
+                
+                # Check constraint violation with improved tolerance handling
                 violation = 0.0
+                tolerance = 1e-6  # Base tolerance for floating point comparisons
+                
+                # Adjust tolerance for categorical features
+                has_categorical = any(feature_types.get(feature_index_to_name.get(idx, ""), "") in ["categorical", "binary"] 
+                                     for idx in constraint.feature_indices)
+                
+                if has_categorical:
+                    # Use stricter tolerance for categorical features
+                    tolerance = 1e-10
+                
                 if constraint.operator == "<=":
                     violation = max(0, constraint_value - constraint.bound)
+                    constraint_status = "SATISFIED" if violation <= tolerance else "VIOLATED"
                 elif constraint.operator == ">=":
                     violation = max(0, constraint.bound - constraint_value)
+                    constraint_status = "SATISFIED" if violation <= tolerance else "VIOLATED"
                 elif constraint.operator == "==":
                     violation = abs(constraint_value - constraint.bound)
+                    constraint_status = "SATISFIED" if violation <= tolerance else "VIOLATED"
+                else:
+                    print(f"[CONSTRAINT ERROR] Unknown operator: {constraint.operator}")
+                    violation = 1.0  # Default violation
+                    constraint_status = "ERROR"
                 
-                # **CRITICAL FIX**: Apply adaptive penalty scaling based on objective function magnitude
-                if violation > 0:
-                    # Estimate objective function scale (use a reasonable default)
-                    objective_scale = self.config.get('objective_scale_estimate', 500.0)
+                # Print constraint evaluation details for debugging
+                if debug_output or violation > tolerance:
+                    print(f"\n[CONSTRAINT {i+1}] {constraint.description}")
+                    print(f"[CONSTRAINT {i+1}] Feature values used:")
+                    for idx, name, type_name, value, coeff in feature_values:
+                        print(f"   - Feature {idx} ({name}, {type_name}): {value:.6f} × {coeff:.6f} = {value * coeff:.6f}")
+                    print(f"[CONSTRAINT {i+1}] Total value: {constraint_value:.6f} {constraint.operator} {constraint.bound:.6f}")
+                    print(f"[CONSTRAINT {i+1}] Status: {constraint_status}, Violation: {violation:.6f}")
+                
+                # Apply EXTREME penalty for violations with progressive scaling
+                if violation > tolerance:
+                    violations_count += 1
+                    all_violations.append((i, constraint.description, violation))
                     
-                    # Scale penalty to be proportional to objective function
-                    # Use exponential penalty for severe violations
-                    scaled_penalty = objective_scale * (violation ** 1.5) * 10.0
+                    # Get current objective value estimate for adaptive scaling
+                    # This ensures penalty is always significant relative to objective
+                    current_obj_value = self.config.get('current_objective_value', None)
+                    if current_obj_value is not None:
+                        # Use actual objective value for precise scaling
+                        objective_scale = max(1000.0, abs(current_obj_value) * 10.0)
+                    else:
+                        # Fallback to estimate
+                        objective_scale = max(1000.0, abs(self.config.get('objective_scale_estimate', 1000.0)))
+                    
+                    # Ultra-aggressive penalty scaling:
+                    # 1. For tiny violations: cubic penalty (violation^3)
+                    # 2. For small violations: quartic penalty (violation^4)
+                    # 3. For medium violations: exponential penalty (10^violation)
+                    # 4. For large violations: double exponential (10^(violation*2))
+                    
+                    if violation < 0.1:
+                        # Cubic penalty for tiny violations
+                        scaled_penalty = objective_scale * (violation ** 3) * 10000.0
+                    elif violation < 1.0:
+                        # Quartic penalty for small violations
+                        scaled_penalty = objective_scale * (violation ** 4) * 10000.0
+                    elif violation < 10.0:
+                        # Exponential penalty for medium violations
+                        scaled_penalty = objective_scale * (10 ** violation) * 1000.0
+                    else:
+                        # Double exponential for large violations
+                        scaled_penalty = objective_scale * (10 ** (min(violation * 2, 100))) * 1000.0
+                        # Cap the exponent at 100 to avoid numerical overflow
+                    
+                    # Special handling for categorical features
+                    if has_categorical:
+                        # For categorical features, use even more extreme penalties
+                        # to ensure discrete constraints are strictly enforced
+                        scaled_penalty *= 10.0
+                    
+                    # Progressive multiplier for multiple violations
+                    if violations_count > 1:
+                        # Quadratic scaling with number of violations
+                        scaled_penalty *= (violations_count ** 2)
+                    
                     total_penalty += scaled_penalty
                     
-                    if self._debug_call_count <= 3:
-                        print(f"[DEBUG] Constraint violation: {violation}")
-                        print(f"[DEBUG] Objective scale estimate: {objective_scale}")
-                        print(f"[DEBUG] Scaled penalty: {scaled_penalty}")
+                    if debug_output or violation > 1.0:
+                        print(f"[CONSTRAINT {i+1}] Applied penalty: {scaled_penalty:.2f}")
+                        print(f"[CONSTRAINT {i+1}] Total penalty so far: {total_penalty:.2f}")
                 
             except Exception as e:
-                continue
+                print(f"[CONSTRAINT ERROR] Constraint {i+1} evaluation error: {str(e)}")
+                traceback.print_exc()
+                # Add a massive penalty for errors to discourage problematic solutions
+                total_penalty += 500000.0
+                violations_count += 1
+                all_violations.append((i, f"ERROR: {str(e)}", 999.0))
                 
+        # Final detailed debugging output
+        if total_penalty > 0:
+            print(f"\n[CONSTRAINT SUMMARY] Final penalty: {total_penalty:.2f} for {violations_count} violations")
+            print("[CONSTRAINT VIOLATIONS]")
+            for i, desc, viol in all_violations:
+                print(f"   - Constraint {i+1}: {desc} (violation: {viol:.6f})")
+            
+        # Store the penalty for debugging
+        if not hasattr(self, '_last_penalty'):
+            self._last_penalty = []
+        self._last_penalty.append(total_penalty)
+        
+        # Store current objective estimate for future adaptive scaling
+        if hasattr(self, 'last_objective_value'):
+            self.config['current_objective_value'] = self.last_objective_value
+            
         return total_penalty
 
     def _prepare_cobyla_constraints(self):
-        """Prepare constraints specifically for COBYLA algorithm"""
+        """Prepare constraints specifically for COBYLA algorithm with enhanced categorical handling"""
         if not self.constraints:
+            print("[COBYLA] No constraints defined")
             return []
             
         cobyla_constraints = []
         
-        for constraint in self.constraints:
+        # Get feature types for better debugging
+        feature_types = {}
+        if hasattr(self, 'bounds_dict') and self.bounds_dict:
+            for feature_name, bounds in self.bounds_dict.items():
+                if bounds and hasattr(bounds, 'feature_type'):
+                    feature_types[feature_name] = bounds.feature_type
+        
+        # Create feature index to name mapping for better debugging
+        feature_index_to_name = {}
+        if self.feature_names:
+            for i, name in enumerate(self.feature_names):
+                feature_index_to_name[i] = name
+        
+        print(f"\n[COBYLA] Setting up {len(self.constraints)} constraints")
+        
+        for i, constraint in enumerate(self.constraints):
             try:
+                # Print detailed constraint information
+                feature_indices_str = ", ".join(str(idx) for idx in constraint.feature_indices)
+                feature_names = []
+                has_categorical = False
+                
+                # Check if constraint involves categorical features
+                for idx in constraint.feature_indices:
+                    if idx < len(self.feature_names):
+                        feature_name = self.feature_names[idx]
+                        if feature_name in self.bounds_dict:
+                            bounds = self.bounds_dict[feature_name]
+                            feature_type = bounds.feature_type if bounds else "unknown"
+                            feature_names.append(f"{feature_name}({feature_type})")
+                            
+                            if feature_type in ["categorical", "binary"]:
+                                has_categorical = True
+                        else:
+                            feature_names.append(f"{feature_name}(unknown)")
+                    else:
+                        feature_names.append(f"unknown_{idx}")
+                
+                print(f"[COBYLA] Constraint {i+1}: {constraint.description}")
+                print(f"[COBYLA] Features: {', '.join(feature_names)}")
+                print(f"[COBYLA] Operator: {constraint.operator}, Bound: {constraint.bound}")
+                if has_categorical:
+                    print(f"[COBYLA] WARNING: This constraint includes categorical features!")
+                
                 # COBYLA expects constraint functions that return >= 0 when satisfied
-                def make_constraint_func(constraint):
+                def make_constraint_func(constraint, constraint_id, has_categorical=False):
                     def constraint_func(x):
+                        # Always apply categorical constraints first
+                        # This is critical for consistent constraint evaluation
+                        x_constrained = self._apply_categorical_constraints(x)
+                        
+                        # Debug tracking
+                        if not hasattr(constraint_func, 'eval_count'):
+                            constraint_func.eval_count = 0
+                        constraint_func.eval_count += 1
+                        
+                        debug_output = constraint_func.eval_count <= 5
+                        
+                        # Calculate constraint value with detailed debugging
                         constraint_value = 0.0
+                        feature_details = []
+                        
                         for idx, coeff in zip(constraint.feature_indices, constraint.coefficients):
-                            if idx < len(x):
-                                constraint_value += coeff * x[idx]
+                            if idx < len(x_constrained):
+                                feature_value = x_constrained[idx]
+                                term_value = coeff * feature_value
+                                constraint_value += term_value
+                                
+                                # Get feature name and type for debugging
+                                feature_name = feature_index_to_name.get(idx, f"unknown_{idx}")
+                                feature_type = "unknown"
+                                if feature_name in self.bounds_dict:
+                                    bounds = self.bounds_dict[feature_name]
+                                    if bounds:
+                                        feature_type = bounds.feature_type
+                                
+                                feature_details.append((idx, feature_name, feature_type, feature_value, coeff, term_value))
+                            else:
+                                print(f"[COBYLA ERROR] Constraint {constraint_id} references feature index {idx} which is out of bounds for input vector of length {len(x_constrained)}")
+                                return -1.0  # Return constraint violation
                         
-                        # Return value >= 0 when constraint is satisfied
+                        # Determine result based on operator
                         if constraint.operator == "<=":
-                            return constraint.bound - constraint_value  # bound - value >= 0
+                            result = constraint.bound - constraint_value  # bound - value >= 0
+                            satisfied = result >= 0
                         elif constraint.operator == ">=":
-                            return constraint_value - constraint.bound  # value - bound >= 0
+                            result = constraint_value - constraint.bound  # value - bound >= 0
+                            satisfied = result >= 0
                         elif constraint.operator == "==":
-                            # For equality, create two inequality constraints
-                            return constraint.bound - abs(constraint_value - constraint.bound)
+                            # For equality constraints, use a tolerance
+                            # Adjust tolerance based on whether categorical features are involved
+                            tolerance = 1e-8 if has_categorical else 1e-6
+                            deviation = abs(constraint_value - constraint.bound)
+                            result = tolerance - deviation
+                            satisfied = result >= 0
+                        else:
+                            print(f"[COBYLA ERROR] Unknown operator: {constraint.operator}")
+                            return -1.0
                         
-                        return 0.0
+                        # Print detailed debugging info
+                        if debug_output or not satisfied:
+                            print(f"\n[COBYLA] Evaluating constraint {constraint_id}: {constraint.description}")
+                            print(f"[COBYLA] Feature values:")
+                            for idx, name, type_name, value, coeff, term in feature_details:
+                                print(f"   - {name}({idx}, {type_name}): {value:.6f} × {coeff:.6f} = {term:.6f}")
+                            
+                            print(f"[COBYLA] Total value: {constraint_value:.6f} {constraint.operator} {constraint.bound:.6f}")
+                            print(f"[COBYLA] Result: {result:.6f} ({'SATISFIED' if satisfied else 'VIOLATED'})")
+                        
+                        return result
+                    
+                    # Initialize eval count
+                    constraint_func.eval_count = 0
                     return constraint_func
                 
-                constraint_func = make_constraint_func(constraint)
-                cobyla_constraints.append({'type': 'ineq', 'fun': constraint_func})
+                # Create constraint function with categorical awareness
+                cobyla_constraints.append({
+                    'type': 'ineq',
+                    'fun': make_constraint_func(constraint, i+1, has_categorical)
+                })
+                
+                # For equality constraints with non-categorical features, add a second constraint
+                # This ensures the value is both <= bound+tolerance and >= bound-tolerance
+                if constraint.operator == "==" and not has_categorical:
+                    def make_eq_constraint_func(constraint, constraint_id):
+                        def constraint_func(x):
+                            # Apply categorical constraints first
+                            x_constrained = self._apply_categorical_constraints(x)
+                            
+                            # Calculate constraint value
+                            constraint_value = 0.0
+                            for idx, coeff in zip(constraint.feature_indices, constraint.coefficients):
+                                if idx < len(x_constrained):
+                                    constraint_value += coeff * x_constrained[idx]
+                                else:
+                                    return -1.0  # Return constraint violation
+                            
+                            # This one checks that value >= bound - tolerance
+                            result = constraint_value - (constraint.bound - 1e-6)
+                            
+                            # Debug output
+                            if not hasattr(constraint_func, 'eval_count'):
+                                constraint_func.eval_count = 0
+                            constraint_func.eval_count += 1
+                            
+                            if constraint_func.eval_count <= 5 or result < 0:
+                                print(f"[COBYLA] Constraint {constraint_id}b: {constraint_value:.6f} >= {constraint.bound - 1e-6:.6f} (result: {result:.6f})")
+                            
+                            return result
+                        
+                        # Initialize eval count
+                        constraint_func.eval_count = 0
+                        return constraint_func
+                    
+                    cobyla_constraints.append({
+                        'type': 'ineq',
+                        'fun': make_eq_constraint_func(constraint, f"{i+1}b")
+                    })
+                
+                print(f"[COBYLA] Successfully added constraint {i+1}")
                 
             except Exception as e:
-                continue
+                print(f"[COBYLA ERROR] Failed to create constraint {i+1}: {str(e)}")
+                traceback.print_exc()
                 
+        print(f"[COBYLA] Total constraints created: {len(cobyla_constraints)}")
         return cobyla_constraints
 
     def _cobyla_optimization(self, objective, bounds, constraints=None, callback=None):
@@ -1893,15 +2290,42 @@ class OptimizationWorker(QThread):
         return bounds
     
     def _prepare_bounds_and_space(self):
-        """Prepare bounds and space configuration for different optimization algorithms"""
+        """Prepare bounds and space configuration for different optimization algorithms
+        
+        CRITICAL FIX: Use self.feature_names as the authoritative source of feature order
+        rather than relying on dictionary iteration order which is not guaranteed to be consistent.
+        """
         if not self.bounds_dict:
             self._create_default_bounds()
             
         bounds = []
         space_config = []  # For scikit-optimize
         
-        for feature_name, bound_config in self.bounds_dict.items():
+        # CRITICAL FIX: Always use self.feature_names for consistent ordering
+        if not self.feature_names:
+            # Fallback if feature_names is not available
+            print("[WARNING] No feature_names available, using bounds_dict keys for ordering")
+            ordered_features = list(self.bounds_dict.keys())
+        else:
+            # Use feature_names as the authoritative source of order
+            ordered_features = self.feature_names
+            
+        print(f"[DEBUG] Preparing bounds for {len(ordered_features)} features in strict order")
+        
+        # Process features in the exact order specified by ordered_features
+        for i, feature_name in enumerate(ordered_features):
             try:
+                # Skip features not in bounds_dict (should not happen in normal operation)
+                if feature_name not in self.bounds_dict:
+                    print(f"[WARNING] Feature {feature_name} not found in bounds_dict, using default bounds")
+                    bounds.append((0.0, 1.0))
+                    if SKOPT_AVAILABLE:
+                        space_config.append(Real(0.0, 1.0, name=feature_name))
+                    continue
+                    
+                # Get bound configuration for this feature
+                bound_config = self.bounds_dict[feature_name]
+                
                 if bound_config is None:
                     bounds.append((0.0, 1.0))
                     if SKOPT_AVAILABLE:
@@ -1962,7 +2386,15 @@ class OptimizationWorker(QThread):
                 bounds.append((0.0, 1.0))
                 if SKOPT_AVAILABLE:
                     space_config.append(Real(0.0, 1.0, name=feature_name))
-                        
+        
+        # Verify bounds length matches feature count
+        if len(bounds) != len(ordered_features):
+            print(f"[ERROR] Bounds length mismatch: {len(bounds)} bounds for {len(ordered_features)} features")
+            
+        # Print first few bounds for debugging
+        for i, ((min_val, max_val), feature_name) in enumerate(zip(bounds[:5], ordered_features[:5])):
+            print(f"[DEBUG] Bound {i}: {feature_name} = [{min_val}, {max_val}]")
+            
         return bounds, space_config
         
     def _create_default_bounds(self):
@@ -2920,27 +3352,100 @@ class TargetOptimizationModule(QWidget):
         return bounds
     
     def add_constraint(self):
-        """Add a new constraint"""
+        """Add a new constraint with enhanced validation and categorical feature handling"""
         if not self.feature_names:
             QMessageBox.warning(self, "Warning", "No features available for constraints!")
             return
             
-        # Simple constraint dialog
-        from PyQt5.QtWidgets import QDialog, QDialogButtonBox
+        # Enhanced constraint dialog
+        from PyQt5.QtWidgets import QDialog, QDialogButtonBox, QListWidget, QCheckBox, QAbstractItemView
         
         dialog = QDialog(self)
         dialog.setWindowTitle("Add Constraint")
         dialog.setModal(True)
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(500)
         
         layout = QVBoxLayout(dialog)
         
-        # Feature selection
-        feature_layout = QHBoxLayout()
-        feature_layout.addWidget(QLabel("Feature:"))
-        feature_combo = QComboBox()
-        feature_combo.addItems(self.feature_names)
-        feature_layout.addWidget(feature_combo)
-        layout.addLayout(feature_layout)
+        # Constraint type selection
+        constraint_type_layout = QHBoxLayout()
+        constraint_type_layout.addWidget(QLabel("Constraint Type:"))
+        constraint_type_combo = QComboBox()
+        constraint_type_combo.addItems(["Single Feature", "Multiple Features"])
+        constraint_type_layout.addWidget(constraint_type_combo)
+        layout.addLayout(constraint_type_layout)
+        
+        # Feature selection - stacked widgets
+        feature_stack = QStackedWidget()
+        
+        # Single feature selection
+        single_feature_widget = QWidget()
+        single_feature_layout = QHBoxLayout(single_feature_widget)
+        single_feature_layout.addWidget(QLabel("Feature:"))
+        single_feature_combo = QComboBox()
+        single_feature_combo.addItems(self.feature_names)
+        single_feature_layout.addWidget(single_feature_combo)
+        feature_stack.addWidget(single_feature_widget)
+        
+        # Feature type warning for single feature
+        feature_type_warning = QLabel("")
+        feature_type_warning.setStyleSheet("color: red; font-weight: bold;")
+        single_feature_layout.addWidget(feature_type_warning)
+        
+        # Multiple feature selection
+        multi_feature_widget = QWidget()
+        multi_feature_layout = QVBoxLayout(multi_feature_widget)
+        multi_feature_layout.addWidget(QLabel("Select Features and Coefficients:"))
+        
+        feature_coeff_table = QTableWidget()
+        feature_coeff_table.setColumnCount(4)  # Added column for feature type
+        feature_coeff_table.setHorizontalHeaderLabels(["Feature", "Include", "Coefficient", "Type"])
+        feature_coeff_table.setRowCount(len(self.feature_names))
+        
+        for i, feature in enumerate(self.feature_names):
+            # Feature name
+            feature_item = QTableWidgetItem(feature)
+            feature_item.setFlags(feature_item.flags() & ~Qt.ItemIsEditable)
+            feature_coeff_table.setItem(i, 0, feature_item)
+            
+            # Include checkbox
+            include_checkbox = QCheckBox()
+            feature_coeff_table.setCellWidget(i, 1, include_checkbox)
+            
+            # Coefficient input
+            coeff_spinbox = QDoubleSpinBox()
+            coeff_spinbox.setRange(-100, 100)
+            coeff_spinbox.setValue(1.0)
+            coeff_spinbox.setSingleStep(0.1)
+            feature_coeff_table.setCellWidget(i, 2, coeff_spinbox)
+            
+            # Feature type info
+            feature_type = "continuous"
+            if hasattr(self, 'feature_bounds') and feature in self.feature_bounds:
+                bounds = self.feature_bounds[feature]
+                feature_type = bounds.feature_type
+                
+            type_item = QTableWidgetItem(feature_type)
+            type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
+            # Highlight categorical features
+            if feature_type in ["categorical", "binary"]:
+                type_item.setForeground(QBrush(QColor("red")))
+            feature_coeff_table.setItem(i, 3, type_item)
+        
+        feature_coeff_table.resizeColumnsToContents()
+        multi_feature_layout.addWidget(feature_coeff_table)
+        
+        # Warning for categorical features in multi-feature constraints
+        multi_warning_label = QLabel("Warning: Including categorical features in multi-feature constraints may cause unexpected behavior!")
+        multi_warning_label.setStyleSheet("color: red; font-weight: bold;")
+        multi_feature_layout.addWidget(multi_warning_label)
+        
+        feature_stack.addWidget(multi_feature_widget)
+        layout.addWidget(feature_stack)
+        
+        # Connect constraint type change
+        constraint_type_combo.currentIndexChanged.connect(feature_stack.setCurrentIndex)
         
         # Operator selection
         op_layout = QHBoxLayout()
@@ -2952,10 +3457,11 @@ class TargetOptimizationModule(QWidget):
         
         # Value input
         val_layout = QHBoxLayout()
-        val_layout.addWidget(QLabel("Value:"))
+        val_layout.addWidget(QLabel("Bound Value:"))
         val_input = QDoubleSpinBox()
         val_input.setRange(-1000000, 1000000)
         val_input.setValue(0.5)
+        val_input.setDecimals(6)  # Allow more precision
         val_layout.addWidget(val_input)
         layout.addLayout(val_layout)
         
@@ -2967,6 +3473,50 @@ class TargetOptimizationModule(QWidget):
         desc_layout.addWidget(desc_input)
         layout.addLayout(desc_layout)
         
+        # Show current feature bounds for reference
+        bounds_info = QTextEdit()
+        bounds_info.setReadOnly(True)
+        bounds_info.setMaximumHeight(200)
+        bounds_info.setPlaceholderText("Feature bounds information will appear here...")
+        
+        # Populate bounds info with more detailed information
+        bounds_text = "Feature Bounds Reference:\n"
+        for i, feature in enumerate(self.feature_names):
+            if hasattr(self, 'feature_bounds') and feature in self.feature_bounds:
+                bounds = self.feature_bounds[feature]
+                bounds_text += f"• {feature} ({bounds.feature_type}):"
+                
+                if bounds.feature_type in ["categorical", "binary"]:
+                    bounds_text += f" Values: {bounds.categorical_values}\n"
+                else:
+                    bounds_text += f" [{bounds.min_value:.4f}, {bounds.max_value:.4f}]\n"
+            else:
+                bounds_text += f"• {feature}: No bounds information available\n"
+        
+        bounds_info.setText(bounds_text)
+        layout.addWidget(QLabel("Feature Bounds Reference:"))
+        layout.addWidget(bounds_info)
+        
+        # Function to update feature type warning
+        def update_feature_type_warning():
+            feature_name = single_feature_combo.currentText()
+            if hasattr(self, 'feature_bounds') and feature in self.feature_bounds:
+                bounds = self.feature_bounds[feature_name]
+                if bounds.feature_type in ["categorical", "binary"]:
+                    feature_type_warning.setText(f"Warning: {feature_name} is {bounds.feature_type}!")
+                    # Show possible values
+                    if bounds.categorical_values:
+                        val_input.setSpecialValueText(f"Possible values: {bounds.categorical_values}")
+                else:
+                    feature_type_warning.setText("")
+                    val_input.setSpecialValueText("")
+        
+        # Connect signal
+        single_feature_combo.currentIndexChanged.connect(update_feature_type_warning)
+        
+        # Initialize warning
+        update_feature_type_warning()
+        
         # Buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dialog.accept)
@@ -2974,23 +3524,126 @@ class TargetOptimizationModule(QWidget):
         layout.addWidget(buttons)
         
         if dialog.exec_() == QDialog.Accepted:
-            # Add constraint to list
-            feature_name = feature_combo.currentText()
-            feature_idx = self.feature_names.index(feature_name)
+            # Process based on constraint type
             operator = op_combo.currentText()
-            value = val_input.value()
-            description = desc_input.text() or f"{feature_name} {operator} {value}"
+            bound_value = val_input.value()
             
-            constraint = OptimizationConstraint(
-                feature_indices=[feature_idx],
-                coefficients=[1.0],
-                operator=operator,
-                bound=value,
-                description=description
-            )
+            if constraint_type_combo.currentIndex() == 0:
+                # Single feature constraint
+                feature_name = single_feature_combo.currentText()
+                feature_idx = self.feature_names.index(feature_name)
+                
+                # Check if this is a categorical feature and validate bound value
+                is_categorical = False
+                if hasattr(self, 'feature_bounds') and feature_name in self.feature_bounds:
+                    bounds = self.feature_bounds[feature_name]
+                    if bounds.feature_type in ["categorical", "binary"]:
+                        is_categorical = True
+                        
+                        # For categorical features, verify the bound makes sense
+                        if bounds.categorical_values and bound_value not in bounds.categorical_values:
+                            categorical_warning = (f"Warning: {bound_value} is not one of the possible values for "
+                                                 f"categorical feature {feature_name}.\n\n"
+                                                 f"Possible values: {bounds.categorical_values}\n\n"
+                                                 f"Do you want to continue anyway?")
+                            reply = QMessageBox.question(dialog, "Categorical Constraint Warning", 
+                                                       categorical_warning, 
+                                                       QMessageBox.Yes | QMessageBox.No)
+                            if reply == QMessageBox.No:
+                                return
+                
+                description = desc_input.text() or f"{feature_name} {operator} {bound_value}"
+                
+                # For categorical features, add special handling note to description
+                if is_categorical:
+                    description += f" (categorical feature)"
+                
+                constraint = OptimizationConstraint(
+                    feature_indices=[feature_idx],
+                    coefficients=[1.0],
+                    operator=operator,
+                    bound=bound_value,
+                    description=description
+                )
+                
+                self.constraints.append(constraint)
+                
+            else:
+                # Multiple feature constraint
+                feature_indices = []
+                coefficients = []
+                feature_names_list = []
+                categorical_features = []
+                
+                for i in range(feature_coeff_table.rowCount()):
+                    include_checkbox = feature_coeff_table.cellWidget(i, 1)
+                    
+                    if include_checkbox and include_checkbox.isChecked():
+                        feature_name = feature_coeff_table.item(i, 0).text()
+                        feature_idx = self.feature_names.index(feature_name)
+                        feature_indices.append(feature_idx)
+                        
+                        coeff_spinbox = feature_coeff_table.cellWidget(i, 2)
+                        coefficient = coeff_spinbox.value()
+                        coefficients.append(coefficient)
+                        
+                        feature_names_list.append(f"{coefficient}*{feature_name}")
+                        
+                        # Check if this is a categorical feature
+                        if hasattr(self, 'feature_bounds') and feature_name in self.feature_bounds:
+                            bounds = self.feature_bounds[feature_name]
+                            if bounds.feature_type in ["categorical", "binary"]:
+                                categorical_features.append(feature_name)
+                
+                if not feature_indices:
+                    QMessageBox.warning(self, "Warning", "No features selected for constraint!")
+                    return
+                
+                # Warn about categorical features in multi-feature constraints
+                if categorical_features:
+                    categorical_warning = (f"Warning: The following categorical features are included "
+                                         f"in this multi-feature constraint: {', '.join(categorical_features)}.\n\n"
+                                         f"Constraints on categorical features may not work as expected.\n\n"
+                                         f"Do you want to continue anyway?")
+                    reply = QMessageBox.question(dialog, "Categorical Constraint Warning", 
+                                               categorical_warning, 
+                                               QMessageBox.Yes | QMessageBox.No)
+                    if reply == QMessageBox.No:
+                        return
+                
+                # Create description if not provided
+                if not desc_input.text():
+                    description = " + ".join(feature_names_list) + f" {operator} {bound_value}"
+                    if categorical_features:
+                        description += f" (includes categorical features: {', '.join(categorical_features)})"
+                else:
+                    description = desc_input.text()
+                
+                constraint = OptimizationConstraint(
+                    feature_indices=feature_indices,
+                    coefficients=coefficients,
+                    operator=operator,
+                    bound=bound_value,
+                    description=description
+                )
+                
+                self.constraints.append(constraint)
             
-            self.constraints.append(constraint)
+            # Update the constraints display
             self.update_constraints_table()
+            
+            # Print detailed debug info about the new constraint
+            print(f"\n[CONSTRAINT] Added new constraint: {constraint.description}")
+            print(f"[CONSTRAINT] Feature indices: {constraint.feature_indices}")
+            print(f"[CONSTRAINT] Coefficients: {constraint.coefficients}")
+            print(f"[CONSTRAINT] Operator: {constraint.operator}")
+            print(f"[CONSTRAINT] Bound: {constraint.bound}")
+            
+            # Show success message with debug info
+            QMessageBox.information(self, "Constraint Added", 
+                                  f"Successfully added constraint:\n{constraint.description}\n\n"
+                                  f"Feature indices: {constraint.feature_indices}\n"
+                                  f"Make sure to check the console for detailed constraint evaluation during optimization.")
     
     def update_constraints_table(self):
         """Update constraints table display"""
@@ -3062,6 +3715,19 @@ class TargetOptimizationModule(QWidget):
                 'performance_tracking': self.performance_viz_checkbox.isChecked()
             }
             
+            # Log feature names and constraints for debugging
+            print("\n[OPTIMIZATION START] Feature order reference:")
+            for i, feature_name in enumerate(self.feature_names):
+                print(f"  {i}: {feature_name}")
+                
+            print("\n[OPTIMIZATION START] Constraints:")
+            for i, constraint in enumerate(self.constraints):
+                feature_indices = constraint.feature_indices
+                feature_names = [self.feature_names[idx] if idx < len(self.feature_names) else f"unknown_{idx}" for idx in feature_indices]
+                print(f"  Constraint {i+1}: {constraint.description}")
+                print(f"    Features: {', '.join([f'{name}(idx={idx})' for name, idx in zip(feature_names, feature_indices)])}")
+                print(f"    Operator: {constraint.operator}, Bound: {constraint.bound}")
+                
             # Reset real-time history
             self.real_time_history = []
             
