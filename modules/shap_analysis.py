@@ -1934,12 +1934,16 @@ class SHAPAnalysisModule(QWidget):
             return False
         return True
     
-    def set_model(self, trained_model):
+    def set_model(self, trained_model, feature_names=None, feature_info=None, X_train=None, y_train=None):
         """Set trained model from training module"""
         self.model = trained_model
         
-        # Extract feature names from model safely
-        self._extract_feature_names()
+        # Store feature names if provided
+        if feature_names:
+            self.feature_names = feature_names
+        else:
+            # Extract feature names from model safely
+            self._extract_feature_names()
         
         # Extract model information
         model_info = self._get_model_info(self.model)
@@ -1955,8 +1959,20 @@ class SHAPAnalysisModule(QWidget):
         self.load_background_btn.setEnabled(True)
         self.load_explain_btn.setEnabled(True)
         
-        # If we have training data, auto-set background data
-        if self.training_data is not None:
+        # If training data is provided, store it
+        if X_train is not None and y_train is not None:
+            self.training_data = {'X': X_train.copy(), 'y': y_train.copy()}
+            
+            # Update sample info
+            self.sample_info_text.setText(
+                f"Training Data Loaded:\n"
+                f"• Samples: {len(X_train)}\n"
+                f"• Features: {len(feature_names) if feature_names else X_train.shape[1]}\n"
+                f"• Target: {y_train.name if hasattr(y_train, 'name') else 'Unknown'}\n"
+                f"• Feature names: {', '.join(feature_names[:5]) if feature_names else 'N/A'}{'...' if feature_names and len(feature_names) > 5 else ''}"
+            )
+            
+            # Auto-setup the data
             self._auto_setup_data()
         
         self.status_label.setText("Model loaded from training session")

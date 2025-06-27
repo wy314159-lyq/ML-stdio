@@ -34,7 +34,7 @@ class MatSciMLStudioWindow(QMainWindow):
         
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("MatSci-ML Studio v1.0")
+        self.setWindowTitle("AutoMatFlow Studio v1.0")
         self.setGeometry(100, 100, 1400, 900)
         
         # Set application font
@@ -199,7 +199,11 @@ class MatSciMLStudioWindow(QMainWindow):
         
         # Training module -> SHAP Analysis and Target Optimization
         self.training_module.model_ready.connect(self.shap_analysis.set_model)
-        self.training_module.model_ready.connect(self.target_optimization.set_model)
+        # Modified to pass training data to target optimization
+        self.training_module.model_ready.connect(
+            lambda model, feature_names, feature_info, X_train, y_train: 
+            self.target_optimization.set_model(model, feature_names, feature_info, X_train)
+        )
         self.training_module.model_ready.connect(lambda: self.set_module_enabled(8, True))  # Enable SHAP Analysis
         self.training_module.model_ready.connect(lambda: self.set_module_enabled(9, True))  # Enable Target Optimization
         # Multi-Objective Optimization is independent and doesn't need model_ready signal
@@ -361,7 +365,7 @@ class MatSciMLStudioWindow(QMainWindow):
     def save_project(self):
         """Save project"""
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Project", "", "MatSci-ML Projects (*.mml)"
+            self, "Save Project", "", "AutoMatFlow Projects (*.mml)"
         )
         
         if file_path:
@@ -375,7 +379,7 @@ class MatSciMLStudioWindow(QMainWindow):
     def load_project(self):
         """Load project"""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Project", "", "MatSci-ML Projects (*.mml)"
+            self, "Load Project", "", "AutoMatFlow Projects (*.mml)"
         )
         
         if file_path:
@@ -403,16 +407,16 @@ class MatSciMLStudioWindow(QMainWindow):
     def show_about(self):
         """Show about dialog"""
         about_text = """
-        <h2>MatSci-ML Studio v1.0</h2>
+        <h2>AutoMatFlow Studio v1.0</h2>
         This software is developed by Dr. Yu Wang from Sichuan University. Welcome to use! If you have any questions or bugs, please contact the email 1255201958@qq.com
         """
         
-        QMessageBox.about(self, "About MatSci-ML Studio", about_text)
+        QMessageBox.about(self, "About AutoMatFlow Studio", about_text)
         
     def show_user_guide(self):
         """Show user guide"""
         guide_text = """
-        <h2>MatSci-ML Studio User Guide</h2>
+        <h2>AutoMatFlow Studio User Guide</h2>
         
         <h3>Module 1: Data & Preprocessing</h3>
         <p>Import your materials data from CSV or Excel files. Explore data quality, 
@@ -457,7 +461,7 @@ class MatSciMLStudioWindow(QMainWindow):
 def main():
     """Main application entry point"""
     app = QApplication(sys.argv)
-    app.setApplicationName("MatSci-ML Studio")
+    app.setApplicationName("AutoMatFlow Studio")
     app.setApplicationVersion("1.0")
     
     # Set application style

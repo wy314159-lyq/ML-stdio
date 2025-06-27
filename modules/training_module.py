@@ -41,7 +41,7 @@ class TrainingModule(QWidget):
     """Model training and evaluation module"""
     
     # Signals
-    model_ready = pyqtSignal(object)  # Trained pipeline
+    model_ready = pyqtSignal(object, list, dict, object, object)  # Trained pipeline, feature_names, feature_info, X_train, y_train
     progress_updated = pyqtSignal(int)
     status_updated = pyqtSignal(str)
     training_started = pyqtSignal()  # Training start signal
@@ -2143,8 +2143,30 @@ class TrainingModule(QWidget):
             return
             
         try:
-            # Emit signal with trained model
-            self.model_ready.emit(self.trained_pipeline)
+            # Prepare feature information for optimization
+            feature_names = list(self.X.columns) if hasattr(self.X, 'columns') else None
+            
+            # Prepare feature type information
+            feature_info = {}
+            if hasattr(self.X, 'columns'):
+                for col in self.X.columns:
+                    # Detect feature type
+                    if self.X[col].dtype == 'bool' or (set(self.X[col].unique()) <= {0, 1, 0.0, 1.0}):
+                        feature_info[col] = {'type': 'binary', 'values': [0, 1]}
+                    elif self.X[col].dtype in ['object', 'category']:
+                        unique_vals = sorted(self.X[col].unique())
+                        feature_info[col] = {'type': 'categorical', 'values': list(unique_vals)}
+                    else:
+                        feature_info[col] = {'type': 'continuous'}
+            
+            # Emit signal with trained model and training data for optimization
+            self.model_ready.emit(
+                self.trained_pipeline,  # Trained model
+                feature_names,          # Feature names
+                feature_info,           # Feature type information
+                self.X,                 # Training data features
+                self.y                  # Training data target
+            )
             
             self.status_updated.emit("Model ready for prediction.")
             QMessageBox.information(self, "Success", "Model training completed! Ready for predictions.")

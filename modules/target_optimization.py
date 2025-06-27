@@ -1296,9 +1296,17 @@ class OptimizationWorker(QThread):
                         constraint_penalty = self._evaluate_constraints(x)
                         if constraint_penalty > 0:
                             self.constraint_violations += 1
-                            prediction += constraint_penalty
+                            # CRITICAL FIX: Apply penalty correctly based on optimization direction
+                            # For maximization, we need to subtract the penalty (since we negate later)
+                            # For minimization, we add the penalty
+                            if self.target_direction == "maximize":
+                                prediction -= constraint_penalty
+                            else:
+                                prediction += constraint_penalty
+                            
                             if self._debug_call_count <= 3:
                                 print(f"[DEBUG] Added enhanced constraint penalty: {constraint_penalty}")
+                                print(f"[DEBUG] Direction: {self.target_direction}, Adjusted prediction: {prediction}")
                     
                     # Return negative for maximization (scipy minimizes)
                     final_objective = -prediction if self.target_direction == "maximize" else prediction
@@ -2288,6 +2296,7 @@ class TargetOptimizationModule(QWidget):
         self.constraints = []
         self.optimization_results = None
         self.worker = None
+        self.training_data = None  # Added to store training data
         
         self.init_ui()
         
@@ -2584,9 +2593,18 @@ class TargetOptimizationModule(QWidget):
         
         return panel
         
-    def set_model(self, trained_model, feature_names=None, feature_info=None):
-        """Enhanced model setting with feature type detection and improved feature name extraction"""
+    def set_model(self, trained_model, feature_names=None, feature_info=None, training_data=None):
+        """Enhanced model setting with feature type detection, improved feature name extraction,
+        and dynamic feature bounds calculation from training data
+        
+        Args:
+            trained_model: The trained ML model
+            feature_names: Optional list of feature names
+            feature_info: Optional dictionary with feature metadata
+            training_data: Optional training data (DataFrame or numpy array) to calculate feature bounds
+        """
         self.model = trained_model
+        self.training_data = training_data  # Store training data for reference
         
         # **CRITICAL FIX**: Prioritize model's actual feature names over provided ones
         model_feature_names = None
@@ -2638,7 +2656,8 @@ class TargetOptimizationModule(QWidget):
         self._detect_feature_types(feature_info)
         
         if self.model is not None and self.feature_names is not None:
-            self.setup_feature_bounds()
+            # Setup feature bounds using training data if available
+            self.setup_feature_bounds(training_data)
             self.start_button.setEnabled(True)
             self.status_label.setText("Model loaded from training session. Ready for optimization.")
             
@@ -2706,8 +2725,8 @@ class TargetOptimizationModule(QWidget):
                 return final_estimator.n_features_in_
         return 10  # Default fallback
         
-    def setup_feature_bounds(self):
-        """Enhanced setup feature bounds table with type detection"""
+    def setup_feature_bounds(self, training_data=None):
+        """Enhanced setup feature bounds table with dynamic range calculation from training data"""
         if not self.feature_names:
             return
             
@@ -2716,6 +2735,41 @@ class TargetOptimizationModule(QWidget):
             self.bounds_table.setColumnCount(5)
             self.bounds_table.setHorizontalHeaderLabels(["Feature", "Min", "Max", "Fixed", "Type"])
             self.bounds_table.setRowCount(len(self.feature_names))
+            
+            # Calculate feature bounds from training data if available
+            feature_ranges = {}
+            
+            if training_data is not None:
+                print(f"[INFO] Calculating feature bounds from training data")
+                
+                # Convert to DataFrame if numpy array
+                if isinstance(training_data, np.ndarray):
+                    if len(self.feature_names) == training_data.shape[1]:
+                        training_data = pd.DataFrame(training_data, columns=self.feature_names)
+                    else:
+                        print(f"[WARNING] Training data shape {training_data.shape} doesn't match feature count {len(self.feature_names)}")
+                        training_data = None
+                
+                # Extract min/max values for each feature
+                if isinstance(training_data, pd.DataFrame):
+                    for feature in self.feature_names:
+                        if feature in training_data.columns:
+                            min_val = training_data[feature].min()
+                            max_val = training_data[feature].max()
+                            
+                            # Add a small buffer (5%) to continuous features to allow exploration
+                            feature_info = self.feature_types.get(feature, {'type': 'continuous'})
+                            if feature_info['type'] == 'continuous':
+                                range_size = max_val - min_val
+                                buffer = range_size * 0.05  # 5% buffer
+                                min_val = max(0, min_val - buffer) if min_val >= 0 else min_val - buffer
+                                max_val = max_val + buffer
+                            
+                            feature_ranges[feature] = {
+                                'min': min_val,
+                                'max': max_val
+                            }
+                            print(f"[INFO] Feature '{feature}' range: {min_val:.4f} to {max_val:.4f}")
             
             for i, feature in enumerate(self.feature_names):
                 # Feature name
@@ -2728,37 +2782,19 @@ class TargetOptimizationModule(QWidget):
                 feature_type = feature_info['type']
                 categorical_values = feature_info['categorical_values']
                 
-                # Set default bounds based on feature type
-                # CRITICAL FIX: Use realistic ranges for features, not [0,1]
-                if feature_type == "binary":
-                    min_val, max_val = "0", "1"
-                elif feature_type == "categorical" and categorical_values:
-                    min_val, max_val = str(min(categorical_values)), str(max(categorical_values))
+                # Set bounds based on training data or use reasonable defaults
+                if feature in feature_ranges:
+                    # Use bounds from training data
+                    min_val = str(feature_ranges[feature]['min'])
+                    max_val = str(feature_ranges[feature]['max'])
                 else:
-                    # For continuous features, use more realistic ranges
-                    # These will be in original scale, before StandardScaler
-                    if "ENERGY" in feature.upper():
-                        min_val, max_val = "0.0", "100.0"  # Energy levels 0-100
-                    elif "AGE" in feature.upper():
-                        min_val, max_val = "0.0", "100.0"  # Age 0-100
-                    elif "OXYGEN" in feature.upper():
-                        min_val, max_val = "80.0", "100.0"  # Oxygen saturation 80-100%
-                    elif any(x in feature.upper() for x in ["TEMP", "TEMPERATURE"]):
-                        min_val, max_val = "35.0", "42.0"  # Body temperature
-                    elif any(x in feature.upper() for x in ["PRESSURE", "BP"]):
-                        min_val, max_val = "80.0", "200.0"  # Blood pressure
-                    elif any(x in feature.upper() for x in ["RADII", "RADIUS"]):
-                        min_val, max_val = "0.5", "3.0"  # Atomic radii in Angstroms
-                    elif any(x in feature.upper() for x in ["WEIGHT", "MASS"]):
-                        min_val, max_val = "1.0", "300.0"  # Atomic weight
-                    elif "CHARGE" in feature.upper():
-                        min_val, max_val = "1.0", "50.0"  # Nuclear charge
-                    elif "HEAT" in feature.upper():
-                        min_val, max_val = "100.0", "5000.0"  # Heat capacity
-                    elif "LATTICE" in feature.upper():
-                        min_val, max_val = "200.0", "800.0"  # Lattice constants in pm
+                    # Use reasonable defaults based on feature type
+                    if feature_type == "binary":
+                        min_val, max_val = "0", "1"
+                    elif feature_type == "categorical" and categorical_values:
+                        min_val, max_val = str(min(categorical_values)), str(max(categorical_values))
                     else:
-                        # Generic continuous feature range
+                        # Default range for continuous features when no data is available
                         min_val, max_val = "0.0", "100.0"
                 
                 # Min value
@@ -2785,50 +2821,31 @@ class TargetOptimizationModule(QWidget):
             for feature in self.feature_names:
                 feature_info = self.feature_types.get(feature, {'type': 'continuous', 'categorical_values': None})
                 
-                if feature_info['type'] == "binary":
-                    bounds = FeatureBounds(
-                        min_value=0.0, max_value=1.0, is_fixed=False,
-                        feature_type="binary", categorical_values=[0, 1]
-                    )
-                elif feature_info['type'] == "categorical":
-                    cat_values = feature_info['categorical_values'] or [0, 1, 2]
-                    bounds = FeatureBounds(
-                        min_value=float(min(cat_values)), max_value=float(max(cat_values)), is_fixed=False,
-                        feature_type="categorical", categorical_values=cat_values
-                    )
+                if feature in feature_ranges:
+                    # Use bounds from training data
+                    min_val = feature_ranges[feature]['min']
+                    max_val = feature_ranges[feature]['max']
+                elif feature_info['type'] == "binary":
+                    min_val, max_val = 0.0, 1.0
+                elif feature_info['type'] == "categorical" and feature_info['categorical_values']:
+                    cat_values = feature_info['categorical_values']
+                    min_val, max_val = float(min(cat_values)), float(max(cat_values))
                 else:
-                    # Use realistic bounds for continuous features
-                    feature_upper = feature.upper()
-                    if "ENERGY" in feature_upper:
-                        min_val, max_val = 0.0, 100.0
-                    elif "AGE" in feature_upper:
-                        min_val, max_val = 0.0, 100.0
-                    elif "OXYGEN" in feature_upper:
-                        min_val, max_val = 80.0, 100.0
-                    elif any(x in feature_upper for x in ["RADII", "RADIUS"]):
-                        min_val, max_val = 0.5, 3.0
-                    elif any(x in feature_upper for x in ["WEIGHT", "MASS"]):
-                        min_val, max_val = 1.0, 300.0
-                    elif "CHARGE" in feature_upper:
-                        min_val, max_val = 1.0, 50.0
-                    elif "HEAT" in feature_upper:
-                        min_val, max_val = 100.0, 5000.0
-                    elif "LATTICE" in feature_upper:
-                        min_val, max_val = 200.0, 800.0
-                    else:
-                        min_val, max_val = 0.0, 100.0
-                    
-                    bounds = FeatureBounds(
-                        min_value=min_val, max_value=max_val, is_fixed=False,
-                        feature_type="continuous"
-                    )
+                    # Default range for continuous features
+                    min_val, max_val = 0.0, 100.0
                 
-                self.feature_bounds[feature] = bounds
+                self.feature_bounds[feature] = FeatureBounds(
+                    min_value=min_val,
+                    max_value=max_val,
+                    is_fixed=False,
+                    feature_type=feature_info['type'],
+                    categorical_values=feature_info['categorical_values']
+                )
                 
         except Exception as e:
             print(f"Error setting up feature bounds: {e}")
             self.status_label.setText(f"Error setting up feature bounds: {str(e)}")
-        
+    
     def get_feature_bounds(self):
         """Enhanced get feature bounds from table with type support"""
         bounds = {}
