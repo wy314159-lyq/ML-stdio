@@ -2305,4 +2305,443 @@ class TrainingModule(QWidget):
         self.results_tabs = {}
         
         self.setEnabled(False)
-        self.status_updated.emit("Module reset") 
+        self.status_updated.emit("Module reset")
+
+    def show_evaluation_dialog(self):
+        """Show comprehensive model evaluation dialog"""
+        try:
+            if self.trained_pipeline is None:
+                QMessageBox.information(self, "No Model", "Please train a model first.")
+                return
+            
+            if self.evaluation_results is None:
+                QMessageBox.information(self, "No Results", "No evaluation results available.")
+                return
+            
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTabWidget, QTextEdit, QPushButton
+            import matplotlib.pyplot as plt
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.figure import Figure
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Model Evaluation Results")
+            dialog.setModal(True)
+            dialog.resize(800, 600)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Create tab widget for different evaluation views
+            tab_widget = QTabWidget()
+            layout.addWidget(tab_widget)
+            
+            # Metrics summary tab
+            metrics_widget = QWidget()
+            metrics_layout = QVBoxLayout(metrics_widget)
+            
+            metrics_text = QTextEdit()
+            metrics_text.setReadOnly(True)
+            
+            # Generate metrics summary
+            metrics_summary = "Model Evaluation Summary:\n"
+            metrics_summary += "=" * 30 + "\n\n"
+            
+            if 'metrics' in self.evaluation_results:
+                for metric, value in self.evaluation_results['metrics'].items():
+                    if isinstance(value, float):
+                        metrics_summary += f"{metric}: {value:.4f}\n"
+                    else:
+                        metrics_summary += f"{metric}: {value}\n"
+            
+            if 'cv_scores' in self.evaluation_results:
+                cv_scores = self.evaluation_results['cv_scores']
+                metrics_summary += f"\nCross-Validation Results:\n"
+                metrics_summary += f"Mean CV Score: {np.mean(cv_scores):.4f} ± {np.std(cv_scores):.4f}\n"
+                metrics_summary += f"Individual CV Scores: {[f'{score:.4f}' for score in cv_scores]}\n"
+            
+            metrics_text.setPlainText(metrics_summary)
+            metrics_layout.addWidget(metrics_text)
+            
+            tab_widget.addTab(metrics_widget, "Metrics Summary")
+            
+            # Feature importance tab (if available)
+            if hasattr(self, 'feature_importance') and self.feature_importance is not None:
+                importance_widget = QWidget()
+                importance_layout = QVBoxLayout(importance_widget)
+                
+                # Create matplotlib figure for feature importance
+                fig = Figure(figsize=(10, 6))
+                canvas = FigureCanvas(fig)
+                importance_layout.addWidget(canvas)
+                
+                ax = fig.add_subplot(111)
+                
+                # Plot top 15 features
+                top_features = self.feature_importance.head(15)
+                ax.barh(range(len(top_features)), top_features['importance'])
+                ax.set_yticks(range(len(top_features)))
+                ax.set_yticklabels(top_features['feature'])
+                ax.set_xlabel('Importance')
+                ax.set_title('Top 15 Feature Importances')
+                ax.invert_yaxis()
+                
+                fig.tight_layout()
+                canvas.draw()
+                
+                tab_widget.addTab(importance_widget, "Feature Importance")
+            
+            # Model details tab
+            details_widget = QWidget()
+            details_layout = QVBoxLayout(details_widget)
+            
+            details_text = QTextEdit()
+            details_text.setReadOnly(True)
+            
+            # Generate model details
+            details_summary = "Model Details:\n"
+            details_summary += "=" * 20 + "\n\n"
+            
+            details_summary += f"Model Type: {self.model_combo.currentText()}\n"
+            details_summary += f"Task Type: {self.task_type}\n"
+            details_summary += f"Training Samples: {len(self.X)}\n"
+            details_summary += f"Features: {len(self.X.columns)}\n"
+            
+            if self.task_type == 'classification' and hasattr(self, 'class_names'):
+                details_summary += f"Classes: {self.class_names}\n"
+            
+            # Add hyperparameters if available
+            if hasattr(self, 'hpo_results') and self.hpo_results:
+                details_summary += "\nBest Hyperparameters:\n"
+                for param, value in self.hpo_results['best_params'].items():
+                    details_summary += f"  {param}: {value}\n"
+            
+            details_text.setPlainText(details_summary)
+            details_layout.addWidget(details_text)
+            
+            tab_widget.addTab(details_widget, "Model Details")
+            
+            # Close button
+            close_button = QPushButton("Close")
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to show evaluation dialog: {str(e)}")
+    
+    def show_learning_curves(self):
+        """Show learning curves analysis"""
+        try:
+            if self.trained_pipeline is None:
+                QMessageBox.information(self, "No Model", "Please train a model first.")
+                return
+            
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QPushButton, QProgressBar, QLabel
+            from sklearn.model_selection import learning_curve
+            import matplotlib.pyplot as plt
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.figure import Figure
+            
+            # Create dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Learning Curves Analysis")
+            dialog.setModal(True)
+            dialog.resize(900, 600)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Progress bar
+            progress_bar = QProgressBar()
+            progress_label = QLabel("Generating learning curves...")
+            layout.addWidget(progress_label)
+            layout.addWidget(progress_bar)
+            
+            # Create matplotlib figure
+            fig = Figure(figsize=(12, 8))
+            canvas = FigureCanvas(fig)
+            layout.addWidget(canvas)
+            
+            # Close button
+            close_button = QPushButton("Close")
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+            
+            dialog.show()
+            
+            # Generate learning curves
+            progress_bar.setValue(10)
+            
+            # Define training sizes
+            train_sizes = np.linspace(0.1, 1.0, 10)
+            
+            # Generate learning curves
+            scoring = 'accuracy' if self.task_type == 'classification' else 'r2'
+            
+            progress_bar.setValue(30)
+            
+            train_sizes_abs, train_scores, val_scores = learning_curve(
+                self.trained_pipeline, self.X, self.y,
+                train_sizes=train_sizes,
+                cv=5,
+                scoring=scoring,
+                n_jobs=-1,
+                random_state=42
+            )
+            
+            progress_bar.setValue(70)
+            
+            # Calculate mean and std
+            train_mean = np.mean(train_scores, axis=1)
+            train_std = np.std(train_scores, axis=1)
+            val_mean = np.mean(val_scores, axis=1)
+            val_std = np.std(val_scores, axis=1)
+            
+            # Plot learning curves
+            ax1 = fig.add_subplot(2, 2, 1)
+            ax1.plot(train_sizes_abs, train_mean, 'o-', color='blue', label='Training Score')
+            ax1.fill_between(train_sizes_abs, train_mean - train_std, train_mean + train_std, alpha=0.1, color='blue')
+            ax1.plot(train_sizes_abs, val_mean, 'o-', color='red', label='Validation Score')
+            ax1.fill_between(train_sizes_abs, val_mean - val_std, val_mean + val_std, alpha=0.1, color='red')
+            ax1.set_xlabel('Training Set Size')
+            ax1.set_ylabel(f'{scoring.upper()} Score')
+            ax1.set_title('Learning Curves')
+            ax1.legend()
+            ax1.grid(True)
+            
+            # Plot validation curve for a key hyperparameter
+            ax2 = fig.add_subplot(2, 2, 2)
+            
+            # Try to plot validation curve for a relevant hyperparameter
+            model_name = self.model_combo.currentText()
+            if 'Random Forest' in model_name:
+                from sklearn.model_selection import validation_curve
+                param_name = 'n_estimators'
+                param_range = [10, 50, 100, 200, 300]
+                
+                try:
+                    train_scores_val, val_scores_val = validation_curve(
+                        self.trained_pipeline, self.X, self.y,
+                        param_name=param_name, param_range=param_range,
+                        cv=3, scoring=scoring, n_jobs=-1
+                    )
+                    
+                    train_mean_val = np.mean(train_scores_val, axis=1)
+                    train_std_val = np.std(train_scores_val, axis=1)
+                    val_mean_val = np.mean(val_scores_val, axis=1)
+                    val_std_val = np.std(val_scores_val, axis=1)
+                    
+                    ax2.plot(param_range, train_mean_val, 'o-', color='blue', label='Training Score')
+                    ax2.fill_between(param_range, train_mean_val - train_std_val, train_mean_val + train_std_val, alpha=0.1, color='blue')
+                    ax2.plot(param_range, val_mean_val, 'o-', color='red', label='Validation Score')
+                    ax2.fill_between(param_range, val_mean_val - val_std_val, val_mean_val + val_std_val, alpha=0.1, color='red')
+                    ax2.set_xlabel(param_name)
+                    ax2.set_ylabel(f'{scoring.upper()} Score')
+                    ax2.set_title(f'Validation Curve ({param_name})')
+                    ax2.legend()
+                    ax2.grid(True)
+                except:
+                    ax2.text(0.5, 0.5, 'Validation curve not available', ha='center', va='center', transform=ax2.transAxes)
+            else:
+                ax2.text(0.5, 0.5, 'Validation curve not available\nfor this model type', ha='center', va='center', transform=ax2.transAxes)
+            
+            # Plot training history (if available)
+            ax3 = fig.add_subplot(2, 2, 3)
+            if hasattr(self, 'training_history') and self.training_history:
+                epochs = range(1, len(self.training_history) + 1)
+                ax3.plot(epochs, self.training_history, 'o-', color='green')
+                ax3.set_xlabel('Iteration')
+                ax3.set_ylabel('Score')
+                ax3.set_title('Training Progress')
+                ax3.grid(True)
+            else:
+                ax3.text(0.5, 0.5, 'Training history not available', ha='center', va='center', transform=ax3.transAxes)
+            
+            # Plot feature importance (if available)
+            ax4 = fig.add_subplot(2, 2, 4)
+            if hasattr(self, 'feature_importance') and self.feature_importance is not None:
+                top_features = self.feature_importance.head(10)
+                ax4.barh(range(len(top_features)), top_features['importance'])
+                ax4.set_yticks(range(len(top_features)))
+                ax4.set_yticklabels(top_features['feature'])
+                ax4.set_xlabel('Importance')
+                ax4.set_title('Top 10 Feature Importances')
+                ax4.invert_yaxis()
+            else:
+                ax4.text(0.5, 0.5, 'Feature importance not available', ha='center', va='center', transform=ax4.transAxes)
+            
+            progress_bar.setValue(100)
+            progress_label.setText("Learning curves generated successfully!")
+            
+            fig.tight_layout()
+            canvas.draw()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to generate learning curves: {str(e)}")
+    
+    def export_charts(self):
+        """Export training charts and visualizations"""
+        try:
+            if self.trained_pipeline is None:
+                QMessageBox.information(self, "No Model", "Please train a model first.")
+                return
+            
+            from PyQt5.QtWidgets import QFileDialog
+            import matplotlib.pyplot as plt
+            
+            # Get save directory
+            save_dir = QFileDialog.getExistingDirectory(self, "Select Directory to Save Charts")
+            if not save_dir:
+                return
+            
+            # Export learning curves
+            self.export_learning_curves_to_file(save_dir)
+            
+            # Export feature importance if available
+            if hasattr(self, 'feature_importance') and self.feature_importance is not None:
+                self.export_feature_importance_to_file(save_dir)
+            
+            # Export confusion matrix or regression plots
+            if self.task_type == 'classification':
+                self.export_confusion_matrix_to_file(save_dir)
+            else:
+                self.export_regression_plots_to_file(save_dir)
+            
+            QMessageBox.information(self, "Export Complete", f"Charts exported to {save_dir}")
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to export charts: {str(e)}")
+    
+    def export_learning_curves_to_file(self, save_dir):
+        """Export learning curves to file"""
+        try:
+            from sklearn.model_selection import learning_curve
+            import matplotlib.pyplot as plt
+            import os
+            
+            # Generate learning curves
+            train_sizes = np.linspace(0.1, 1.0, 10)
+            scoring = 'accuracy' if self.task_type == 'classification' else 'r2'
+            
+            train_sizes_abs, train_scores, val_scores = learning_curve(
+                self.trained_pipeline, self.X, self.y,
+                train_sizes=train_sizes,
+                cv=5,
+                scoring=scoring,
+                n_jobs=-1,
+                random_state=42
+            )
+            
+            # Calculate mean and std
+            train_mean = np.mean(train_scores, axis=1)
+            train_std = np.std(train_scores, axis=1)
+            val_mean = np.mean(val_scores, axis=1)
+            val_std = np.std(val_scores, axis=1)
+            
+            # Create plot
+            plt.figure(figsize=(10, 6))
+            plt.plot(train_sizes_abs, train_mean, 'o-', color='blue', label='Training Score')
+            plt.fill_between(train_sizes_abs, train_mean - train_std, train_mean + train_std, alpha=0.1, color='blue')
+            plt.plot(train_sizes_abs, val_mean, 'o-', color='red', label='Validation Score')
+            plt.fill_between(train_sizes_abs, val_mean - val_std, val_mean + val_std, alpha=0.1, color='red')
+            plt.xlabel('Training Set Size')
+            plt.ylabel(f'{scoring.upper()} Score')
+            plt.title('Learning Curves')
+            plt.legend()
+            plt.grid(True)
+            
+            # Save plot
+            save_path = os.path.join(save_dir, 'learning_curves.png')
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+        except Exception as e:
+            print(f"Error exporting learning curves: {e}")
+    
+    def export_feature_importance_to_file(self, save_dir):
+        """Export feature importance plot to file"""
+        try:
+            import matplotlib.pyplot as plt
+            import os
+            
+            # Create feature importance plot
+            plt.figure(figsize=(10, 8))
+            top_features = self.feature_importance.head(20)
+            plt.barh(range(len(top_features)), top_features['importance'])
+            plt.yticks(range(len(top_features)), top_features['feature'])
+            plt.xlabel('Importance')
+            plt.title('Top 20 Feature Importances')
+            plt.gca().invert_yaxis()
+            
+            # Save plot
+            save_path = os.path.join(save_dir, 'feature_importance.png')
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+        except Exception as e:
+            print(f"Error exporting feature importance: {e}")
+    
+    def export_confusion_matrix_to_file(self, save_dir):
+        """Export confusion matrix to file"""
+        try:
+            if 'confusion_matrix' not in self.evaluation_results:
+                return
+            
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            import os
+            
+            cm = self.evaluation_results['confusion_matrix']
+            
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                       xticklabels=self.class_names, yticklabels=self.class_names)
+            plt.title('Confusion Matrix')
+            plt.xlabel('Predicted')
+            plt.ylabel('Actual')
+            
+            save_path = os.path.join(save_dir, 'confusion_matrix.png')
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+        except Exception as e:
+            print(f"Error exporting confusion matrix: {e}")
+    
+    def export_regression_plots_to_file(self, save_dir):
+        """Export regression plots to file"""
+        try:
+            if 'y_pred' not in self.evaluation_results:
+                return
+            
+            import matplotlib.pyplot as plt
+            import os
+            
+            y_true = self.evaluation_results['y_true']
+            y_pred = self.evaluation_results['y_pred']
+            
+            # Predicted vs Actual plot
+            plt.figure(figsize=(10, 8))
+            plt.scatter(y_true, y_pred, alpha=0.6)
+            plt.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
+            plt.xlabel('Actual Values')
+            plt.ylabel('Predicted Values')
+            plt.title('Predicted vs Actual Values')
+            
+            save_path = os.path.join(save_dir, 'predicted_vs_actual.png')
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            # Residuals plot
+            residuals = y_true - y_pred
+            plt.figure(figsize=(10, 6))
+            plt.scatter(y_pred, residuals, alpha=0.6)
+            plt.axhline(y=0, color='r', linestyle='--')
+            plt.xlabel('Predicted Values')
+            plt.ylabel('Residuals')
+            plt.title('Residuals Plot')
+            
+            save_path = os.path.join(save_dir, 'residuals_plot.png')
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+        except Exception as e:
+            print(f"Error exporting regression plots: {e}")

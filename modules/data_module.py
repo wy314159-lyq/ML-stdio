@@ -1453,27 +1453,299 @@ class DataModule(QWidget):
         self.update_encoding_description()
 
     def update_encoding_description(self):
-        """Update encoding method description based on selected method"""
+        """Update the encoding method description"""
         method = self.encoding_method_combo.currentText()
-        
         descriptions = {
-            "One-Hot Encoding": 
-                "📊 Creates a boolean column for each category (True/False)\n"
-                "✅ Pros: No ordinal assumptions, works well with linear models\n"
-                "❌ Cons: High-dimensional sparse data, memory intensive\n"
-                "💡 Best for: Few categories (<10), linear models",
-                
-            "Label Encoding":
-                "🔢 Assigns unique integers to each category (0,1,2...)\n"
-                "✅ Pros: Memory efficient, works well with tree models\n"
-                "❌ Cons: Implies ordinal relationship, not suitable for linear models\n"
-                "💡 Best for: Tree models, ordinal categorical variables",
-                
-            "Binary Encoding":
-                "💻 Converts categories to binary representation\n"
-                "✅ Pros: More space-efficient than One-Hot (log2(n) columns)\n"
-                "❌ Cons: Less interpretable, may not preserve relationships\n"
-                "💡 Best for: High-cardinality categories (>20 unique values)"
+            "One-Hot Encoding": "Creates binary columns for each category. Good for nominal data with few categories.",
+            "Label Encoding": "Assigns integer values to categories. Good for ordinal data or high-cardinality features.",
+            "Target Encoding": "Replaces categories with target mean. Good for high-cardinality features.",
+            "Binary Encoding": "Uses binary representation. Memory-efficient for high-cardinality features.",
+            "Frequency Encoding": "Replaces categories with their frequency. Good for capturing category importance."
         }
         
-        self.encoding_description.setText(descriptions.get(method, "")) 
+        self.encoding_description.setText(descriptions.get(method, ""))
+
+    def load_training_data(self):
+        """Load training data specifically - wrapper for import functionality"""
+        try:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, 
+                "Load Training Data", 
+                "", 
+                "CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;All Files (*)"
+            )
+            
+            if file_path:
+                self.file_path_edit.setText(file_path)
+                self.import_data()
+                self.status_updated.emit("Training data loaded successfully")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load training data: {str(e)}")
+    
+    def load_virtual_data(self):
+        """Load virtual screening data specifically - wrapper for import functionality"""
+        try:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, 
+                "Load Virtual Screening Data", 
+                "", 
+                "CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;All Files (*)"
+            )
+            
+            if file_path:
+                self.file_path_edit.setText(file_path)
+                self.import_data()
+                self.status_updated.emit("Virtual screening data loaded successfully")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load virtual screening data: {str(e)}")
+    
+    def show_visualization_dialog(self):
+        """Show comprehensive data visualization dialog"""
+        try:
+            if self.df is None:
+                QMessageBox.information(self, "No Data", "Please load data first.")
+                return
+            
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTabWidget, QPushButton
+            import matplotlib.pyplot as plt
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.figure import Figure
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Data Visualization")
+            dialog.setModal(True)
+            dialog.resize(800, 600)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Create tab widget for different visualizations
+            tab_widget = QTabWidget()
+            layout.addWidget(tab_widget)
+            
+            # Distribution plots tab
+            dist_widget = QWidget()
+            dist_layout = QVBoxLayout(dist_widget)
+            
+            # Create matplotlib figure for distributions
+            fig = Figure(figsize=(10, 6))
+            canvas = FigureCanvas(fig)
+            dist_layout.addWidget(canvas)
+            
+            # Plot distributions of numeric columns
+            numeric_cols = self.df.select_dtypes(include=[np.number]).columns
+            if len(numeric_cols) > 0:
+                n_cols = min(3, len(numeric_cols))
+                n_rows = (len(numeric_cols) + n_cols - 1) // n_cols
+                
+                for i, col in enumerate(numeric_cols[:9]):  # Limit to 9 plots
+                    ax = fig.add_subplot(n_rows, n_cols, i + 1)
+                    self.df[col].hist(bins=30, ax=ax, alpha=0.7)
+                    ax.set_title(f'Distribution of {col}')
+                    ax.set_xlabel(col)
+                    ax.set_ylabel('Frequency')
+                
+                fig.tight_layout()
+                canvas.draw()
+            
+            tab_widget.addTab(dist_widget, "Distributions")
+            
+            # Correlation heatmap tab
+            corr_widget = QWidget()
+            corr_layout = QVBoxLayout(corr_widget)
+            
+            if len(numeric_cols) > 1:
+                corr_fig = Figure(figsize=(10, 8))
+                corr_canvas = FigureCanvas(corr_fig)
+                corr_layout.addWidget(corr_canvas)
+                
+                ax = corr_fig.add_subplot(111)
+                correlation_matrix = self.df[numeric_cols].corr()
+                
+                import seaborn as sns
+                sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', center=0, ax=ax)
+                ax.set_title('Feature Correlation Heatmap')
+                
+                corr_fig.tight_layout()
+                corr_canvas.draw()
+                
+                tab_widget.addTab(corr_widget, "Correlations")
+            
+            # Close button
+            close_button = QPushButton("Close")
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to show visualization: {str(e)}")
+    
+    def show_data_summary(self):
+        """Show comprehensive data summary dialog"""
+        try:
+            if self.df is None:
+                QMessageBox.information(self, "No Data", "Please load data first.")
+                return
+            
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QTabWidget
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Data Summary")
+            dialog.setModal(True)
+            dialog.resize(700, 600)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Create tab widget for different summary views
+            tab_widget = QTabWidget()
+            layout.addWidget(tab_widget)
+            
+            # Basic info tab
+            basic_info_widget = QWidget()
+            basic_info_layout = QVBoxLayout(basic_info_widget)
+            
+            basic_info_text = QTextEdit()
+            basic_info_text.setReadOnly(True)
+            
+            # Generate basic info
+            info_text = f"""
+Dataset Overview:
+================
+Shape: {self.df.shape[0]} rows × {self.df.shape[1]} columns
+Memory Usage: {self.df.memory_usage(deep=True).sum() / 1024**2:.2f} MB
+
+Column Information:
+==================
+"""
+            
+            for col in self.df.columns:
+                dtype = self.df[col].dtype
+                null_count = self.df[col].isnull().sum()
+                null_pct = (null_count / len(self.df)) * 100
+                unique_count = self.df[col].nunique()
+                
+                info_text += f"{col}:\n"
+                info_text += f"  - Data Type: {dtype}\n"
+                info_text += f"  - Missing Values: {null_count} ({null_pct:.1f}%)\n"
+                info_text += f"  - Unique Values: {unique_count}\n\n"
+            
+            basic_info_text.setPlainText(info_text)
+            basic_info_layout.addWidget(basic_info_text)
+            
+            tab_widget.addTab(basic_info_widget, "Basic Info")
+            
+            # Statistical summary tab
+            stats_widget = QWidget()
+            stats_layout = QVBoxLayout(stats_widget)
+            
+            stats_text = QTextEdit()
+            stats_text.setReadOnly(True)
+            
+            # Generate statistical summary
+            numeric_cols = self.df.select_dtypes(include=[np.number]).columns
+            if len(numeric_cols) > 0:
+                stats_summary = self.df[numeric_cols].describe()
+                stats_text.setPlainText(stats_summary.to_string())
+            else:
+                stats_text.setPlainText("No numeric columns found for statistical summary.")
+            
+            stats_layout.addWidget(stats_text)
+            tab_widget.addTab(stats_widget, "Statistics")
+            
+            # Data quality tab
+            quality_widget = QWidget()
+            quality_layout = QVBoxLayout(quality_widget)
+            
+            quality_text = QTextEdit()
+            quality_text.setReadOnly(True)
+            
+            # Generate data quality report
+            quality_report = f"""
+Data Quality Assessment:
+========================
+
+Missing Values by Column:
+-------------------------
+"""
+            
+            for col in self.df.columns:
+                missing_count = self.df[col].isnull().sum()
+                missing_pct = (missing_count / len(self.df)) * 100
+                quality_report += f"{col}: {missing_count} ({missing_pct:.1f}%)\n"
+            
+            quality_report += f"\nDuplicate Rows: {self.df.duplicated().sum()}\n"
+            
+            # Check for potential issues
+            quality_report += "\nPotential Issues:\n"
+            quality_report += "-----------------\n"
+            
+            for col in numeric_cols:
+                if self.df[col].isnull().sum() > len(self.df) * 0.5:
+                    quality_report += f"⚠️ {col}: High missing value rate (>{50}%)\n"
+                
+                if self.df[col].nunique() == 1:
+                    quality_report += f"⚠️ {col}: Constant values (no variation)\n"
+            
+            quality_text.setPlainText(quality_report)
+            quality_layout.addWidget(quality_text)
+            
+            tab_widget.addTab(quality_widget, "Data Quality")
+            
+            # Close button
+            close_button = QPushButton("Close")
+            close_button.clicked.connect(dialog.accept)
+            layout.addWidget(close_button)
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to show data summary: {str(e)}")
+    
+    def copy_selection(self):
+        """Copy selected data to clipboard"""
+        try:
+            if self.df is None:
+                return
+            
+            # Copy the entire dataframe to clipboard (could be enhanced to copy only selected rows)
+            self.df.to_clipboard(index=False)
+            self.status_updated.emit("Data copied to clipboard")
+        except Exception as e:
+            print(f"Error copying data: {e}")
+    
+    def paste_data(self):
+        """Paste data from clipboard"""
+        try:
+            # Try to read data from clipboard
+            clipboard_data = pd.read_clipboard()
+            if clipboard_data is not None and not clipboard_data.empty:
+                self.df = clipboard_data
+                self.load_data_overview()
+                self.status_updated.emit("Data pasted from clipboard")
+            else:
+                QMessageBox.information(self, "Paste Data", "No valid data found in clipboard")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to paste data: {str(e)}")
+    
+    def find_text(self, search_text):
+        """Find text in the data"""
+        try:
+            if self.df is None:
+                return
+            
+            # Search in all string columns
+            results = []
+            for col in self.df.select_dtypes(include=['object']).columns:
+                mask = self.df[col].astype(str).str.contains(search_text, case=False, na=False)
+                if mask.any():
+                    matching_rows = self.df[mask]
+                    results.append(f"Found {mask.sum()} matches in column '{col}'")
+            
+            if results:
+                result_text = "\n".join(results)
+                QMessageBox.information(self, "Search Results", result_text)
+            else:
+                QMessageBox.information(self, "Search Results", f"No matches found for '{search_text}'")
+                
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to search: {str(e)}") 

@@ -497,6 +497,7 @@ class MixedVariableSampling(Sampling):
 class EnhancedBoundaryRepair(Repair):
     """
     Enhanced repair operator that ensures all constraints are satisfied
+    Compatible with different pymoo versions that may pass Population objects or NumPy arrays
     """
     
     def __init__(self, feature_types, categorical_ranges=None, fixed_features=None):
@@ -511,12 +512,35 @@ class EnhancedBoundaryRepair(Repair):
         self.categorical_ranges = categorical_ranges or {}
         self.fixed_features = fixed_features or {}
         
-    def _do(self, problem, X, **kwargs):
-        """Repair solutions to satisfy all constraints"""
+    def _do(self, problem, pop_or_X, **kwargs):
+        """
+        Repair solutions to satisfy all constraints
+        Enhanced to handle both Population objects and NumPy arrays for pymoo compatibility
+        """
+        # Handle different pymoo API versions
+        if hasattr(pop_or_X, 'get') and callable(pop_or_X.get):
+            # Input is a Population object (older pymoo versions)
+            is_population_object = True
+            X = pop_or_X.get("X")
+            if X is None:
+                # Fallback for different Population implementations
+                try:
+                    X = pop_or_X.X
+                except AttributeError:
+                    raise ValueError("Unable to extract design matrix from Population object")
+        else:
+            # Input is already a NumPy array (newer pymoo versions)
+            is_population_object = False
+            X = pop_or_X
+        
+        # Ensure X is a proper 2D array
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+        
         X_repaired = X.copy()
         
-        for i in range(X.shape[0]):
-            for j in range(X.shape[1]):
+        for i in range(X_repaired.shape[0]):
+            for j in range(X_repaired.shape[1]):
                 # Apply fixed features first
                 if j in self.fixed_features:
                     X_repaired[i, j] = self.fixed_features[j]
@@ -546,7 +570,19 @@ class EnhancedBoundaryRepair(Repair):
                         X_repaired[i, j] = np.clip(X_repaired[i, j], problem.xl[j], problem.xu[j])
                 # Continuous features don't need additional processing beyond clipping
         
-        return X_repaired
+        # Return appropriate type based on input
+        if is_population_object:
+            # Set the repaired values back into the Population object
+            try:
+                pop_or_X.set("X", X_repaired)
+                return pop_or_X
+            except AttributeError:
+                # Fallback: directly assign to X attribute
+                pop_or_X.X = X_repaired
+                return pop_or_X
+        else:
+            # Return the repaired NumPy array directly
+            return X_repaired
 
 
 def batch_predict_models(models, indices_list, X_pop, feature_names):
@@ -753,8 +789,8 @@ class OptimizationCheckpoint:
         try:
             checkpoint_data = {
                 'generation': generation,
-                'population_X': algorithm.pop.get("X") if algorithm.pop else None,
-                'population_F': algorithm.pop.get("F") if algorithm.pop else None,
+                'population_X': algorithm.pop.get("X") if algorithm.pop is not None else None,
+                'population_F': algorithm.pop.get("F") if algorithm.pop is not None else None,
                 'config': config,
                 'timestamp': datetime.datetime.now().isoformat(),
                 'additional_data': additional_data or {}
@@ -825,8 +861,29 @@ class ConstraintViolationMonitor:
         self.total_evaluations = 0
         self.total_violations = 0
         
-    def check_violations(self, X, problem, feature_types, fixed_features=None):
-        """Check for constraint violations in population"""
+    def check_violations(self, X_or_pop, problem, feature_types, fixed_features=None):
+        """
+        Check for constraint violations in population
+        Enhanced to handle both Population objects and NumPy arrays for pymoo compatibility
+        """
+        # Handle different pymoo API versions
+        if hasattr(X_or_pop, 'get') and callable(X_or_pop.get):
+            # Input is a Population object
+            X = X_or_pop.get("X")
+            if X is None:
+                # Fallback for different Population implementations
+                try:
+                    X = X_or_pop.X
+                except AttributeError:
+                    raise ValueError("Unable to extract design matrix from Population object")
+        else:
+            # Input is already a NumPy array
+            X = X_or_pop
+        
+        # Ensure X is a proper 2D array
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+        
         violations = []
         n_violations = 0
         
@@ -2094,12 +2151,106 @@ class MultiObjectiveOptimizationWorker(QThread):
                 if pareto_front is None or len(pareto_front) == 0:
                     raise ValueError("Optimization failed to find any solutions")
                 
-                # Apply fixed features to solutions (they're not automatically included in res.X)
-                if fixed_features:
-                    self.status_updated.emit("Applying fixed feature values to solutions...")
-                    for i in range(len(pareto_solutions)):
+                # Handle potential dimension mismatch between pareto_solutions and feature_names
+                if pareto_solutions.shape[1] != len(feature_names):
+                    self.status_updated.emit("Attempting to reconstruct complete feature solutions...")
+                    
+                    n_solutions = len(pareto_solutions)
+                    n_total_features = len(feature_names)
+                    
+                    # First normalize pareto_solutions to 2D if needed
+                    if pareto_solutions.ndim > 2:
+                        self.status_updated.emit(f"Normalizing pareto_solutions from {pareto_solutions.ndim}D to 2D")
+                        original_shape = pareto_solutions.shape
+                        if pareto_solutions.ndim == 3 and original_shape[1] == 1:
+                            pareto_solutions = pareto_solutions.squeeze(axis=1)
+                        else:
+                            pareto_solutions = pareto_solutions.reshape(original_shape[0], -1)
+                        self.status_updated.emit(f"Normalized shape: {pareto_solutions.shape}")
+                    
+                    if fixed_features and pareto_solutions.shape[1] == (n_total_features - len(fixed_features)):
+                        # Case 1: pareto_solutions only contains variable features
+                        self.status_updated.emit("Case 1: Reconstructing from variable-only solutions")
+                        complete_solutions = np.zeros((n_solutions, n_total_features))
+                        
+                        # Create mapping of variable features
+                        variable_feature_indices = [i for i in range(n_total_features) if i not in fixed_features]
+                        
+                        for i in range(n_solutions):
+                            for complete_idx in range(n_total_features):
+                                if complete_idx in fixed_features:
+                                    # Set fixed feature value
+                                    complete_solutions[i, complete_idx] = fixed_features[complete_idx]
+                                else:
+                                    # Find this feature in the variable features list
+                                    try:
+                                        var_position = variable_feature_indices.index(complete_idx)
+                                        if var_position < pareto_solutions.shape[1]:
+                                            complete_solutions[i, complete_idx] = pareto_solutions[i, var_position]
+                                        else:
+                                            self.status_updated.emit(f"Warning: Cannot map feature {complete_idx}")
+                                            complete_solutions[i, complete_idx] = 0.0
+                                    except ValueError:
+                                        self.status_updated.emit(f"Warning: Feature {complete_idx} not in variable list")
+                                        complete_solutions[i, complete_idx] = 0.0
+                        
+                        pareto_solutions = complete_solutions
+                        self.status_updated.emit(f"✅ Solutions reconstructed from variable features: {pareto_solutions.shape}")
+                        
+                    else:
+                        # Case 2: Unknown dimension mismatch - handle complex array shapes
+                        self.status_updated.emit("Case 2: Unknown dimension pattern, attempting shape normalization")
+                        self.status_updated.emit(f"Original pareto_solutions shape: {pareto_solutions.shape}")
+                        
+                        # First, ensure pareto_solutions is 2D
+                        if pareto_solutions.ndim > 2:
+                            # Reshape to 2D by flattening extra dimensions
+                            original_shape = pareto_solutions.shape
+                            if pareto_solutions.ndim == 3:
+                                # Shape (n_solutions, 1, n_features) -> (n_solutions, n_features)
+                                if original_shape[1] == 1:
+                                    pareto_solutions = pareto_solutions.squeeze(axis=1)
+                                    self.status_updated.emit(f"Squeezed 3D array to 2D: {pareto_solutions.shape}")
+                                else:
+                                    # Reshape (n_solutions, dim1, dim2) -> (n_solutions, dim1*dim2)
+                                    pareto_solutions = pareto_solutions.reshape(original_shape[0], -1)
+                                    self.status_updated.emit(f"Reshaped 3D array to 2D: {pareto_solutions.shape}")
+                            else:
+                                # For higher dimensions, flatten everything except first dimension
+                                pareto_solutions = pareto_solutions.reshape(pareto_solutions.shape[0], -1)
+                                self.status_updated.emit(f"Flattened {len(original_shape)}D array to 2D: {pareto_solutions.shape}")
+                        
+                        # Now proceed with 2D array handling
+                        complete_solutions = np.zeros((n_solutions, n_total_features))
+                        
+                        # Copy what we can, handling dimension mismatches safely
+                        try:
+                            cols_to_copy = min(pareto_solutions.shape[1], n_total_features)
+                            complete_solutions[:, :cols_to_copy] = pareto_solutions[:, :cols_to_copy]
+                            self.status_updated.emit(f"Copied {cols_to_copy} columns from pareto_solutions")
+                        except Exception as copy_error:
+                            self.status_updated.emit(f"Warning: Direct copy failed ({copy_error}), using element-wise copy")
+                            # Fallback: copy element by element
+                            for i in range(min(n_solutions, pareto_solutions.shape[0])):
+                                for j in range(min(pareto_solutions.shape[1], n_total_features)):
+                                    complete_solutions[i, j] = pareto_solutions[i, j]
+                        
+                        # Apply fixed features
                         for feature_idx, fixed_value in fixed_features.items():
-                            pareto_solutions[i, feature_idx] = fixed_value
+                            if feature_idx < n_total_features:
+                                complete_solutions[:, feature_idx] = fixed_value
+                        
+                        pareto_solutions = complete_solutions
+                        self.status_updated.emit(f"✅ Solutions reconstructed with shape normalization: {pareto_solutions.shape}")
+                else:
+                    self.status_updated.emit("Dimensions match - using solutions directly")
+                    
+                    # Still apply fixed features to ensure consistency
+                    if fixed_features:
+                        for feature_idx, fixed_value in fixed_features.items():
+                            if feature_idx < pareto_solutions.shape[1]:
+                                pareto_solutions[:, feature_idx] = fixed_value
+                        self.status_updated.emit("Fixed feature values applied to ensure consistency")
                 
                 # Check if additional repair is needed (only if repair wasn't used during optimization)
                 has_mixed_variables = any(ftype in ['binary', 'categorical'] for ftype in feature_types)
@@ -2198,11 +2349,37 @@ class MultiObjectiveOptimizationWorker(QThread):
                 solution_diversity = []
                 for i in range(len(feature_names)):
                     if i not in fixed_features:
-                        feature_values = pareto_solutions[:, i]
-                        feature_range = np.max(feature_values) - np.min(feature_values)
-                        solution_diversity.append(feature_range)
+                        # Add bounds checking to prevent index errors
+                        if i < pareto_solutions.shape[1]:
+                            feature_values = pareto_solutions[:, i]
+                            feature_range = np.max(feature_values) - np.min(feature_values)
+                            solution_diversity.append(feature_range)
+                        else:
+                            # Feature index exceeds available columns in pareto_solutions
+                            self.status_updated.emit(f"⚠️  Warning: Feature {i} ({feature_names[i] if i < len(feature_names) else f'Feature_{i}'}) not found in optimization results")
                 
                 avg_solution_diversity = np.mean(solution_diversity) if solution_diversity else 0
+                
+                # Add comprehensive debug information about array shapes and fixed features
+                self.status_updated.emit(f"Debug info: pareto_solutions shape = {pareto_solutions.shape}, feature_names count = {len(feature_names)}")
+                self.status_updated.emit(f"Debug info: pareto_front shape = {original_objectives.shape}")
+                self.status_updated.emit(f"Debug info: fixed_features = {fixed_features}")
+                self.status_updated.emit(f"Debug info: first few pareto_solutions values = {pareto_solutions[:2] if len(pareto_solutions) > 0 else 'None'}")
+                
+                if pareto_solutions.shape[1] != len(feature_names):
+                    self.status_updated.emit(f"⚠️  Dimension mismatch detected: expected {len(feature_names)} features, got {pareto_solutions.shape[1]} columns")
+                    
+                    # Additional debug: check if we need reconstruction
+                    if fixed_features:
+                        variable_features_count = len(feature_names) - len(fixed_features)
+                        self.status_updated.emit(f"Debug: Variable features expected = {variable_features_count}, Fixed features = {len(fixed_features)}")
+                        
+                        if pareto_solutions.shape[1] == variable_features_count:
+                            self.status_updated.emit("⚠️  Detected: pareto_solutions only contains variable features, reconstruction needed!")
+                        else:
+                            self.status_updated.emit("⚠️  Unexpected dimension mismatch pattern")
+                else:
+                    self.status_updated.emit("✅ Dimensions match - pareto_solutions should contain all features")
                 self.status_updated.emit(f"Average solution diversity: {avg_solution_diversity:.6f}")
                 
                 # 优化结果质量评估
@@ -4936,6 +5113,34 @@ class MultiObjectiveOptimizationModule(QWidget):
             print(f"Report generation error: {e}")
             return None
     
+    def _safe_float_conversion(self, value):
+        """
+        Safely convert any value to float, handling arrays and edge cases
+        
+        Args:
+            value: The value to convert (scalar, array, or other)
+            
+        Returns:
+            float: Converted scalar value
+        """
+        try:
+            if hasattr(value, '__len__') and not isinstance(value, str):
+                # It's an array-like object
+                if len(value) == 1:
+                    return float(value[0])
+                elif len(value) > 1:
+                    # Multi-value array, take first element
+                    return float(value[0])
+                else:
+                    # Empty array
+                    return 0.0
+            else:
+                # It's already a scalar
+                return float(value)
+        except (ValueError, TypeError, IndexError, AttributeError):
+            # Fallback to 0.0 if conversion fails
+            return 0.0
+
     def update_solutions_table(self, results: Dict[str, Any]):
         """Update the solutions table with results"""
         try:
@@ -4965,19 +5170,41 @@ class MultiObjectiveOptimizationModule(QWidget):
                     value = pareto_front[i, j]
                     self.solutions_table.setItem(i, j + 1, QTableWidgetItem(f"{value:.4f}"))
                 
-                # Features - handle fixed features specially
+                # Features - now pareto_solutions should contain all features including fixed ones
                 for j in range(n_features):
-                    if j in fixed_features:
-                        # For fixed features, show the fixed value
-                        value = fixed_features[j]
-                        item = QTableWidgetItem(f"{value:.4f}")
-                        # Highlight fixed features with different background
-                        item.setBackground(Qt.lightGray)
-                        item.setToolTip(f"Fixed feature: {feature_names[j]} = {value:.4f}")
-                    else:
-                        # For variable features, show the optimized value
+                    # Check if we have this feature in the solutions array
+                    if j < pareto_solutions.shape[1]:
                         value = pareto_solutions[i, j]
-                        item = QTableWidgetItem(f"{value:.4f}")
+                        value_scalar = self._safe_float_conversion(value)
+                        
+                        # Additional validation: ensure we have a valid numeric value
+                        if np.isnan(value_scalar) or np.isinf(value_scalar):
+                            if j in fixed_features:
+                                value_scalar = fixed_features[j]  # Use the original fixed value
+                            else:
+                                value_scalar = 0.0  # Fallback for invalid variable features
+                        
+                        item = QTableWidgetItem(f"{value_scalar:.4f}")
+                        
+                        # Highlight fixed features with different background
+                        if j in fixed_features:
+                            item.setBackground(Qt.lightGray)
+                            item.setToolTip(f"Fixed feature: {feature_names[j]} = {value_scalar:.4f}")
+                        else:
+                            item.setToolTip(f"Variable feature: {feature_names[j]} = {value_scalar:.4f}")
+                    else:
+                        # Fallback: try to get value from fixed_features if possible
+                        if j in fixed_features:
+                            value_scalar = fixed_features[j]
+                            item = QTableWidgetItem(f"{value_scalar:.4f}")
+                            item.setBackground(Qt.lightGray)
+                            item.setToolTip(f"Fixed feature (fallback): {feature_names[j]} = {value_scalar:.4f}")
+                        else:
+                            # Last resort: show N/A with warning
+                            item = QTableWidgetItem("N/A")
+                            item.setBackground(Qt.red)
+                            item.setToolTip(f"ERROR: Feature {feature_names[j]} not found in optimization results")
+                            self.log_text.append(f"⚠️  Critical: Feature {j} ({feature_names[j]}) missing from solutions")
                     
                     self.solutions_table.setItem(i, j + 1 + n_objectives, item)
             
@@ -5036,9 +5263,14 @@ class MultiObjectiveOptimizationModule(QWidget):
                 for i, obj_name in enumerate(objective_names):
                     data[obj_name] = pareto_front[:, i]
                 
-                # Add feature columns
+                # Add feature columns - now pareto_solutions should contain all features
                 for i, feature_name in enumerate(feature_names):
-                    data[feature_name] = pareto_solutions[:, i]
+                    if i < pareto_solutions.shape[1]:
+                        data[feature_name] = pareto_solutions[:, i]
+                    else:
+                        # This should rarely happen now, but keep as fallback
+                        self.log_text.append(f"⚠️  Warning: Feature {feature_name} (index {i}) not found in results, filling with NaN")
+                        data[feature_name] = [np.nan] * len(pareto_front)
                 
                 df = pd.DataFrame(data)
                 df.to_csv(file_path, index=False)
