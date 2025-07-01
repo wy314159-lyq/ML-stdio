@@ -56,6 +56,16 @@ try:
 except ImportError:
     LGB_AVAILABLE = False
 
+try:
+    import catboost as cb
+    CATBOOST_AVAILABLE = True
+except ImportError:
+    CATBOOST_AVAILABLE = False
+
+# Gaussian Process models
+from sklearn.gaussian_process import GaussianProcessClassifier, GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel, ConstantKernel as C
+
 
 def get_available_models(task_type: str) -> Dict[str, Any]:
     """
@@ -104,13 +114,18 @@ def get_available_models(task_type: str) -> Dict[str, Any]:
             'Quadratic Discriminant Analysis': QuadraticDiscriminantAnalysis,
             
             # Neural Networks
-            'MLP Classifier': MLPClassifier
+            'MLP Classifier': MLPClassifier,
+            
+            # Gaussian Process Models
+            'Gaussian Process Classifier': GaussianProcessClassifier
         }
         
         if XGB_AVAILABLE:
             models['XGBoost Classifier'] = xgb.XGBClassifier
         if LGB_AVAILABLE:
             models['LightGBM Classifier'] = lgb.LGBMClassifier
+        if CATBOOST_AVAILABLE:
+            models['CatBoost Classifier'] = cb.CatBoostClassifier
             
     elif task_type.lower() == 'regression':
         models = {
@@ -145,13 +160,18 @@ def get_available_models(task_type: str) -> Dict[str, Any]:
             'Radius Neighbors Regressor': RadiusNeighborsRegressor,
             
             # Neural Networks
-            'MLP Regressor': MLPRegressor
+            'MLP Regressor': MLPRegressor,
+            
+            # Gaussian Process Models
+            'Gaussian Process Regressor': GaussianProcessRegressor
         }
         
         if XGB_AVAILABLE:
             models['XGBoost Regressor'] = xgb.XGBRegressor
         if LGB_AVAILABLE:
             models['LightGBM Regressor'] = lgb.LGBMRegressor
+        if CATBOOST_AVAILABLE:
+            models['CatBoost Regressor'] = cb.CatBoostRegressor
     else:
         raise ValueError(f"Unknown task type: {task_type}")
     
@@ -418,6 +438,51 @@ def get_default_hyperparameters(model_name: str, task_type: str) -> Dict[str, Li
         # Add class balancing for LightGBM classification
         if task_type == 'classification':
             params['is_unbalance'] = [True, False]
+    
+    # CatBoost Models
+    elif model_name in ['CatBoost', 'CatBoost Classifier', 'CatBoost Regressor'] and CATBOOST_AVAILABLE:
+        params = {
+            'iterations': [100, 200, 300, 500, 800],
+            'learning_rate': [0.01, 0.05, 0.1, 0.15, 0.2, 0.3],
+            'depth': [3, 4, 5, 6, 7, 8, 10],
+            'l2_leaf_reg': [1, 3, 5, 10, 100],
+            'border_count': [32, 64, 128, 254],
+            'bagging_temperature': [0, 0.5, 1, 2, 5],
+            'random_strength': [0, 1, 2, 5, 10],
+            'od_type': ['IncToDec', 'Iter'],
+            'od_wait': [10, 20, 50, 100]
+        }
+        # Add task-specific parameters
+        if task_type == 'classification':
+            params.update({
+                'class_weights': [[1, 1], [1, 2], [1, 3], [1, 5]],
+                'auto_class_weights': ['Balanced', 'SqrtBalanced']
+            })
+        else:  # regression
+            params.update({
+                'loss_function': ['RMSE', 'MAE', 'Quantile', 'LogLinQuantile']
+            })
+    
+    # Gaussian Process Models
+    elif model_name == 'Gaussian Process Classifier':
+        params = {
+            'kernel': ['RBF', 'Matern', 'RBF + WhiteKernel', 'Matern + WhiteKernel'],
+            'n_restarts_optimizer': [0, 1, 2, 5, 10],
+            'max_iter_predict': [100, 200, 500, 1000],
+            'warm_start': [True, False],
+            'copy_X_train': [True, False],
+            'random_state': [42],
+            'multi_class': ['one_vs_rest', 'one_vs_one']
+        }
+    elif model_name == 'Gaussian Process Regressor':
+        params = {
+            'kernel': ['RBF', 'Matern', 'RBF + WhiteKernel', 'Matern + WhiteKernel'],
+            'alpha': [1e-10, 1e-8, 1e-6, 1e-4, 1e-2, 1e-1],
+            'n_restarts_optimizer': [0, 1, 2, 5, 10],
+            'normalize_y': [True, False],
+            'copy_X_train': [True, False],
+            'random_state': [42]
+        }
     
     return params
 
@@ -792,6 +857,58 @@ def get_hyperparameter_distributions(model_name: str, task_type: str) -> Dict[st
             'min_child_weight': randint(1, 10),
             'class_weight': base_params.get('class_weight', ['balanced'])
         }
+    elif model_name in ['LightGBM Classifier', 'LightGBM Regressor'] and LGB_AVAILABLE:
+        distributions = {
+            'n_estimators': randint(50, 500),
+            'learning_rate': uniform(0.01, 0.3),
+            'max_depth': randint(3, 15),
+            'subsample': uniform(0.6, 0.4),
+            'colsample_bytree': uniform(0.6, 0.4),
+            'reg_alpha': uniform(0, 2),
+            'reg_lambda': uniform(0, 2),
+            'min_child_samples': randint(5, 100),
+            'num_leaves': randint(15, 300),
+            'is_unbalance': base_params.get('is_unbalance', [False])
+        }
+    elif model_name in ['CatBoost Classifier', 'CatBoost Regressor'] and CATBOOST_AVAILABLE:
+        distributions = {
+            'iterations': randint(100, 800),
+            'learning_rate': uniform(0.01, 0.29),
+            'depth': randint(3, 10),
+            'l2_leaf_reg': uniform(1, 99),
+            'border_count': [32, 64, 128, 254],
+            'bagging_temperature': uniform(0, 5),
+            'random_strength': uniform(0, 10),
+            'od_type': base_params.get('od_type', ['IncToDec']),
+            'od_wait': randint(10, 100)
+        }
+        # Add task-specific distributions
+        if task_type == 'classification':
+            distributions.update({
+                'class_weights': base_params.get('class_weights', [[1, 1]]),
+                'auto_class_weights': base_params.get('auto_class_weights', ['Balanced'])
+            })
+        else:
+            distributions.update({
+                'loss_function': base_params.get('loss_function', ['RMSE'])
+            })
+    elif model_name == 'Gaussian Process Classifier':
+        distributions = {
+            'kernel': base_params.get('kernel', ['RBF']),
+            'n_restarts_optimizer': randint(0, 10),
+            'max_iter_predict': randint(100, 1000),
+            'warm_start': base_params.get('warm_start', [False]),
+            'copy_X_train': base_params.get('copy_X_train', [True]),
+            'multi_class': base_params.get('multi_class', ['one_vs_rest'])
+        }
+    elif model_name == 'Gaussian Process Regressor':
+        distributions = {
+            'kernel': base_params.get('kernel', ['RBF']),
+            'alpha': uniform(1e-10, 1e-1),
+            'n_restarts_optimizer': randint(0, 10),
+            'normalize_y': base_params.get('normalize_y', [False]),
+            'copy_X_train': base_params.get('copy_X_train', [True])
+        }
     else:
         # For models without specific distributions, use the original grid
         distributions = base_params
@@ -1070,6 +1187,81 @@ def create_model_with_params(model_class, **kwargs):
                 default_lgb_params['objective'] = 'binary'
                 
             for param, value in default_lgb_params.items():
+                if param in valid_params and param not in filtered_kwargs:
+                    filtered_kwargs[param] = value
+                    
+        elif 'CatBoost' in model_name:
+            # Better defaults for CatBoost
+            default_catboost_params = {
+                'iterations': 200,
+                'learning_rate': 0.1,
+                'depth': 6,
+                'l2_leaf_reg': 3,
+                'border_count': 128,
+                'bagging_temperature': 1,
+                'random_strength': 1,
+                'od_type': 'IncToDec',
+                'od_wait': 20,
+                'random_seed': 42,
+                'logging_level': 'Silent',  # Reduce verbose output
+                'allow_writing_files': False  # Prevent writing temp files
+            }
+            
+            
+            
+            # For classification, handle class imbalance
+            if 'Classifier' in model_name:
+                default_catboost_params['auto_class_weights'] = 'Balanced'
+                # Remove class_weights if auto_class_weights is used
+                if 'class_weights' in filtered_kwargs and 'auto_class_weights' in filtered_kwargs:
+                    del filtered_kwargs['class_weights']
+            
+            for param, value in default_catboost_params.items():
+                if param in valid_params and param not in filtered_kwargs:
+                    filtered_kwargs[param] = value
+                    
+        elif 'GaussianProcess' in model_name:
+            # Better defaults for Gaussian Process
+            default_gp_params = {
+                'n_restarts_optimizer': 2,
+                'random_state': 42,
+                'copy_X_train': True
+            }
+            
+            # Add task-specific defaults
+            if 'Classifier' in model_name:
+                default_gp_params.update({
+                    'max_iter_predict': 200,
+                    'warm_start': False,
+                    'multi_class': 'one_vs_rest'
+                })
+            else:  # Regressor
+                default_gp_params.update({
+                    'alpha': 1e-6,
+                    'normalize_y': False
+                })
+            
+            # Handle special kernel parameter processing
+            if 'kernel' in filtered_kwargs:
+                kernel_name = filtered_kwargs['kernel']
+                if isinstance(kernel_name, str):
+                    # Convert string kernel names to actual kernel objects
+                    if kernel_name == 'RBF':
+                        filtered_kwargs['kernel'] = C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e2))
+                    elif kernel_name == 'Matern':
+                        filtered_kwargs['kernel'] = C(1.0, (1e-3, 1e3)) * Matern(length_scale=1.0, nu=1.5)
+                    elif kernel_name == 'RBF + WhiteKernel':
+                        filtered_kwargs['kernel'] = C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e2)) + WhiteKernel(1e-5, (1e-10, 1e-1))
+                    elif kernel_name == 'Matern + WhiteKernel':
+                        filtered_kwargs['kernel'] = C(1.0, (1e-3, 1e3)) * Matern(length_scale=1.0, nu=1.5) + WhiteKernel(1e-5, (1e-10, 1e-1))
+                    else:
+                        # Default to RBF if unknown kernel
+                        filtered_kwargs['kernel'] = C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e2))
+            else:
+                # Set default kernel if not specified
+                filtered_kwargs['kernel'] = C(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-2, 1e2))
+            
+            for param, value in default_gp_params.items():
                 if param in valid_params and param not in filtered_kwargs:
                     filtered_kwargs[param] = value
         

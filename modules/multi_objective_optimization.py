@@ -1672,10 +1672,22 @@ class MultiObjectiveOptimizationWorker(QThread):
             )
             
             # Extract algorithm parameters
-            crossover_prob = self.config.get('crossover_prob', 0.9)
-            crossover_eta = self.config.get('crossover_eta', 15.0)
-            mutation_prob = self.config.get('mutation_prob', None)
-            mutation_eta = self.config.get('mutation_eta', 20.0)
+            selected_algorithm = self.config.get('algorithm', 'NSGA-II')
+            
+            # Get algorithm-specific parameters
+            if selected_algorithm == "Differential Evolution":
+                # For DE, use specialized parameters
+                crossover_prob = self.config.get('crossover_rate', 0.7)  # DE uses CR (crossover rate)
+                mutation_eta = self.config.get('differential_weight', 0.5)  # DE uses F (differential weight)
+                crossover_eta = 15.0  # Not used in DE, but needed for fallback
+                mutation_prob = None  # DE doesn't use separate mutation
+            else:
+                # For genetic algorithms (NSGA-II, NSGA-III, SPEA2, GA)
+                crossover_prob = self.config.get('crossover_prob', 0.9)
+                crossover_eta = self.config.get('crossover_eta', 15.0)
+                mutation_prob = self.config.get('mutation_prob', None)
+                mutation_eta = self.config.get('mutation_eta', 20.0)
+                
             eliminate_duplicates = self.config.get('eliminate_duplicates', True)
             random_seed = self.config.get('random_seed', None)
             verbose = self.config.get('verbose', False)
@@ -1770,7 +1782,7 @@ class MultiObjectiveOptimizationWorker(QThread):
                 mutation = PM(prob=mutation_prob_adjusted, eta=mutation_eta) if PM else None
                 
                 # Create algorithm based on selection and objective count
-                selected_algorithm = self.config.get('algorithm', 'NSGA-II')
+                # selected_algorithm already extracted above
                 
                 if selected_algorithm == "GA (Single-Objective)" or is_single_objective:
                     # Use Genetic Algorithm for single objective
@@ -1934,23 +1946,38 @@ class MultiObjectiveOptimizationWorker(QThread):
                     )
                     self.status_updated.emit(f"⚠️ CMA-ES not available in this pymoo version, using NSGA-II instead")
                 elif selected_algorithm == "Differential Evolution" and DE is not None:
-                    # Use Differential Evolution
+                    # Use Differential Evolution with multi-objective compatibility fix
                     try:
-                        # Configure DE-specific operators if available
-                        if DifferentialEvolution:
-                            crossover_de = DifferentialEvolution(weight=mutation_eta, prob=crossover_prob)
+                        # Check if this is multi-objective
+                        if len(models) > 1:
+                            # For multi-objective, DE needs special configuration to avoid FitnessSurvival
+                            # Use NSGA-II with DE-inspired operators
+                            from pymoo.operators.crossover.dex import DEX
+                            from pymoo.operators.mutation.nom import NoMutation
+                            
+                            # Create DE-style crossover operator
+                            de_crossover = DEX(CR=crossover_prob, F=mutation_eta)
+                            
+                            algorithm = NSGA2(
+                                pop_size=population_size_adjusted,
+                                sampling=sampling,
+                                crossover=de_crossover,
+                                mutation=NoMutation(),  # DE uses only crossover, no separate mutation
+                                repair=repair,
+                                eliminate_duplicates=eliminate_duplicates_adjusted
+                            )
+                            self.status_updated.emit(f"✅ Created NSGA-II with DE operators (multi-objective) CR={crossover_prob:.2f}, F={mutation_eta:.2f}")
                         else:
-                            crossover_de = crossover
-                        
-                        algorithm = DE(
-                            pop_size=population_size_adjusted,
-                            sampling=sampling,
-                            variant="DE/rand/1/bin",
-                            CR=crossover_prob,
-                            F=mutation_eta,
-                            repair=repair
-                        )
-                        self.status_updated.emit(f"✅ Created DE algorithm with CR={crossover_prob:.2f}, F={mutation_eta:.2f}")
+                            # For single-objective, use pure DE
+                            algorithm = DE(
+                                pop_size=population_size_adjusted,
+                                sampling=sampling,
+                                variant="DE/rand/1/bin",
+                                CR=crossover_prob,
+                                F=mutation_eta,
+                                repair=repair
+                            )
+                            self.status_updated.emit(f"✅ Created DE algorithm (single-objective) CR={crossover_prob:.2f}, F={mutation_eta:.2f}")
                     except Exception as e:
                         # Fallback to NSGA-II if DE setup fails
                         algorithm = NSGA2(
@@ -2642,106 +2669,30 @@ class MultiObjectiveOptimizationModule(QWidget):
         self.algo_group = QGroupBox("Genetic Algorithm Settings")
         algo_layout = QFormLayout(self.algo_group)
         
-        # Basic Parameters
-        self.population_spin = QSpinBox()
-        self.population_spin.setMinimum(10)
-        self.population_spin.setMaximum(500)
-        self.population_spin.setValue(50)
-        self.population_spin.setToolTip("Number of individuals in each generation (larger = more diverse but slower)")
-        self.population_spin.valueChanged.connect(lambda: self._mark_param_modified('population_size'))
+        # 创建所有可能的参数控件，但先不添加到布局中
+        self._create_all_parameter_widgets()
+        
+        # 初始化算法参数映射
+        self._init_algorithm_parameter_mapping()
+        
+        # 添加基础参数（所有算法都需要）
         algo_layout.addRow("Population Size:", self.population_spin)
-        
-        self.generations_spin = QSpinBox()
-        self.generations_spin.setMinimum(10)
-        self.generations_spin.setMaximum(2000)
-        self.generations_spin.setValue(100)
-        self.generations_spin.setToolTip("Number of generations to evolve (more = better convergence but longer time)")
         algo_layout.addRow("Number of Generations:", self.generations_spin)
-        
-        # Crossover Parameters
-        self.crossover_prob_spin = QDoubleSpinBox()
-        self.crossover_prob_spin.setMinimum(0.1)
-        self.crossover_prob_spin.setMaximum(1.0)
-        self.crossover_prob_spin.setValue(0.9)
-        self.crossover_prob_spin.setSingleStep(0.1)
-        self.crossover_prob_spin.setDecimals(2)
-        self.crossover_prob_spin.setToolTip("Probability of crossover between parents (0.8-0.95 recommended)")
-        self.crossover_prob_spin.valueChanged.connect(lambda: self._mark_param_modified('crossover_prob'))
-        algo_layout.addRow("Crossover Probability:", self.crossover_prob_spin)
-        
-        self.crossover_eta_spin = QDoubleSpinBox()
-        self.crossover_eta_spin.setMinimum(1.0)
-        self.crossover_eta_spin.setMaximum(50.0)
-        self.crossover_eta_spin.setValue(15.0)
-        self.crossover_eta_spin.setSingleStep(1.0)
-        self.crossover_eta_spin.setDecimals(1)
-        self.crossover_eta_spin.setToolTip("Crossover distribution index (lower = more exploration, higher = more exploitation)")
-        self.crossover_eta_spin.valueChanged.connect(lambda: self._mark_param_modified('crossover_eta'))
-        algo_layout.addRow("Crossover Eta (η_c):", self.crossover_eta_spin)
-        
-        # Mutation Parameters
-        self.mutation_prob_spin = QDoubleSpinBox()
-        self.mutation_prob_spin.setMinimum(0.01)
-        self.mutation_prob_spin.setMaximum(0.5)
-        self.mutation_prob_spin.setValue(0.1)
-        self.mutation_prob_spin.setSingleStep(0.01)
-        self.mutation_prob_spin.setDecimals(3)
-        self.mutation_prob_spin.setToolTip("Probability of mutation (typically 1/n_vars, auto-calculated if 0)")
-        self.mutation_prob_spin.valueChanged.connect(lambda: self._mark_param_modified('mutation_prob'))
-        algo_layout.addRow("Mutation Probability:", self.mutation_prob_spin)
-        
-        self.mutation_eta_spin = QDoubleSpinBox()
-        self.mutation_eta_spin.setMinimum(1.0)
-        self.mutation_eta_spin.setMaximum(100.0)
-        self.mutation_eta_spin.setValue(20.0)
-        self.mutation_eta_spin.setSingleStep(1.0)
-        self.mutation_eta_spin.setDecimals(1)
-        self.mutation_eta_spin.setToolTip("Mutation distribution index (lower = more perturbation, higher = fine-tuning)")
-        self.mutation_eta_spin.valueChanged.connect(lambda: self._mark_param_modified('mutation_eta'))
-        algo_layout.addRow("Mutation Eta (η_m):", self.mutation_eta_spin)
-        
-        # Algorithm Selection
-        self.algorithm_combo = QComboBox()
-        # Add algorithms based on availability
-        algorithms = ["NSGA-II"]
-        if NSGA3:
-            algorithms.append("NSGA-III")
-        if SPEA2:
-            algorithms.append("SPEA2")
-        if MOEAD:
-            algorithms.append("MOEA/D")
-        if CMA_ES:
-            algorithms.append("CMA-ES")
-        if DE:
-            algorithms.append("Differential Evolution")
-        algorithms.append("GA (Single-Objective)")
-        
-        self.algorithm_combo.addItems(algorithms)
-        self.algorithm_combo.setCurrentText("NSGA-II")
-        self.algorithm_combo.setToolTip("Optimization algorithm to use")
-        self.algorithm_combo.currentTextChanged.connect(self.on_algorithm_changed)
         algo_layout.addRow("Algorithm:", self.algorithm_combo)
         
-        # Selection and Survival
-        self.selection_combo = QComboBox()
-        self.selection_combo.addItems(["Tournament Selection", "Random Selection"])
-        self.selection_combo.setCurrentText("Tournament Selection")
-        self.selection_combo.setToolTip("Selection method for choosing parents")
-        algo_layout.addRow("Selection Method:", self.selection_combo)
+        # 动态参数区域（将根据算法变化）
+        # 使用一个widget来容纳动态参数的QFormLayout
+        self.dynamic_params_widget = QWidget()
+        self.dynamic_params_layout = QFormLayout(self.dynamic_params_widget)
+        algo_layout.addRow(self.dynamic_params_widget)
         
-        self.tournament_size_spin = QSpinBox()
-        self.tournament_size_spin.setMinimum(2)
-        self.tournament_size_spin.setMaximum(10)
-        self.tournament_size_spin.setValue(2)
-        self.tournament_size_spin.setToolTip("Tournament size for tournament selection (2 = binary tournament)")
-        algo_layout.addRow("Tournament Size:", self.tournament_size_spin)
+        # 存储当前显示的参数控件
+        self.current_param_widgets = []
         
-        # Convergence and Termination
-        self.eliminate_duplicates_check = QCheckBox()
-        self.eliminate_duplicates_check.setChecked(False)  # 默认关闭以保持帕累托前沿多样性
-        self.eliminate_duplicates_check.setToolTip("Remove duplicate solutions (注意：启用可能会减少帕累托前沿的解数量)")
-        self.eliminate_duplicates_check.stateChanged.connect(lambda: self._mark_param_modified('eliminate_duplicates'))
-        algo_layout.addRow("Eliminate Duplicates:", self.eliminate_duplicates_check)
+        # 初始化为默认算法的参数
+        self._update_dynamic_parameters("NSGA-II")
+        
+        layout.addWidget(self.algo_group)
         
         # Advanced Parameters
         advanced_group = QGroupBox("Advanced Settings")
@@ -3120,6 +3071,9 @@ class MultiObjectiveOptimizationModule(QWidget):
         # Initialize user modified params tracking if not exists
         if not hasattr(self, '_user_modified_params'):
             self._user_modified_params = set()
+        
+        # Update dynamic parameter display first
+        self._update_dynamic_parameters(algorithm_name)
         
         # Update algorithm-specific configurations
         if algorithm_name == "NSGA-III":
@@ -4478,12 +4432,17 @@ class MultiObjectiveOptimizationModule(QWidget):
             else:
                 feature_types.append('continuous')
         
-        # Handle auto mutation probability
-        if self.auto_mutation_check.isChecked():
+        # Get current algorithm
+        algorithm_name = self.algorithm_combo.currentText()
+        
+        # Handle auto mutation probability (for genetic algorithms)
+        if hasattr(self, 'auto_mutation_check') and self.auto_mutation_check.isChecked():
             mutation_prob = 1.0 / len(self.combined_features)
         else:
-            mutation_prob = self.mutation_prob_spin.value()
+            mutation_prob = getattr(self, 'mutation_prob_spin', None)
+            mutation_prob = mutation_prob.value() if mutation_prob else 0.1
         
+        # Base configuration
         config = {
             'models': models,
             'model_indices': model_indices,
@@ -4499,14 +4458,7 @@ class MultiObjectiveOptimizationModule(QWidget):
             'feature_types': feature_types,
             'categorical_ranges': categorical_ranges,
             # Algorithm selection
-            'algorithm': self.algorithm_combo.currentText(),
-            # NSGA-II specific parameters
-            'crossover_prob': self.crossover_prob_spin.value(),
-            'crossover_eta': self.crossover_eta_spin.value(),
-            'mutation_prob': mutation_prob,
-            'mutation_eta': self.mutation_eta_spin.value(),
-            'selection_method': self.selection_combo.currentText(),
-            'tournament_size': self.tournament_size_spin.value(),
+            'algorithm': algorithm_name,
             'eliminate_duplicates': self.eliminate_duplicates_check.isChecked(),
             'random_seed': self.seed_spin.value() if self.seed_spin.value() != -1 else None,
             'verbose': self.verbose_check.isChecked(),
@@ -4531,6 +4483,39 @@ class MultiObjectiveOptimizationModule(QWidget):
             'enable_explicit_constraints': self.enable_constraints_check.isChecked(),
             'adaptive_penalty_coefficients': self.adaptive_penalty_check.isChecked()
         }
+        
+        # Add algorithm-specific parameters
+        if algorithm_name in ["NSGA-II", "NSGA-III", "SPEA2", "GA (Single-Objective)"]:
+            # Genetic Algorithm based parameters
+            config.update({
+                'crossover_prob': self.crossover_prob_spin.value(),
+                'crossover_eta': self.crossover_eta_spin.value(),
+                'mutation_prob': mutation_prob,
+                'mutation_eta': self.mutation_eta_spin.value(),
+                'selection_method': self.selection_combo.currentText(),
+                'tournament_size': self.tournament_size_spin.value(),
+            })
+        elif algorithm_name == "MOEA/D":
+            # MOEA/D specific parameters
+            config.update({
+                'crossover_prob': self.crossover_prob_spin.value(),
+                'crossover_eta': self.crossover_eta_spin.value(),
+                'mutation_prob': mutation_prob,
+                'mutation_eta': self.mutation_eta_spin.value(),
+                'neighbor_size': self.moead_neighbor_size_spin.value(),
+                'decomposition_method': self.moead_decomposition_combo.currentText(),
+            })
+        elif algorithm_name == "CMA-ES":
+            # CMA-ES specific parameters
+            config.update({
+                'sigma': self.cmaes_sigma_spin.value(),
+            })
+        elif algorithm_name == "Differential Evolution":
+            # DE specific parameters
+            config.update({
+                'differential_weight': self.de_differential_weight_spin.value(),
+                'crossover_rate': self.de_crossover_rate_spin.value(),
+            })
         
         return config
     
@@ -5281,6 +5266,271 @@ class MultiObjectiveOptimizationModule(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to export results: {str(e)}")
                 self.log_text.append(f"Export error: {str(e)}")
+
+    def _create_all_parameter_widgets(self):
+        """创建所有可能的参数控件（但不添加到布局中）"""
+        # Basic Parameters (所有算法都需要的基础参数)
+        self.population_spin = QSpinBox()
+        self.population_spin.setMinimum(10)
+        self.population_spin.setMaximum(500)
+        self.population_spin.setValue(50)
+        self.population_spin.setToolTip("Number of individuals in each generation (larger = more diverse but slower)")
+        self.population_spin.valueChanged.connect(lambda: self._mark_param_modified('population_size'))
+        
+        self.generations_spin = QSpinBox()
+        self.generations_spin.setMinimum(10)
+        self.generations_spin.setMaximum(2000)
+        self.generations_spin.setValue(100)
+        self.generations_spin.setToolTip("Number of generations to evolve (more = better convergence but longer time)")
+        
+        # Algorithm Selection
+        self.algorithm_combo = QComboBox()
+        # Add algorithms based on availability
+        algorithms = ["NSGA-II"]
+        if NSGA3:
+            algorithms.append("NSGA-III")
+        if SPEA2:
+            algorithms.append("SPEA2")
+        if MOEAD:
+            algorithms.append("MOEA/D")
+        if CMA_ES:
+            algorithms.append("CMA-ES")
+        if DE:
+            algorithms.append("Differential Evolution")
+        algorithms.append("GA (Single-Objective)")
+        
+        self.algorithm_combo.addItems(algorithms)
+        self.algorithm_combo.setCurrentText("NSGA-II")
+        self.algorithm_combo.setToolTip("Optimization algorithm to use")
+        self.algorithm_combo.currentTextChanged.connect(self.on_algorithm_changed)
+        
+        # Crossover Parameters
+        self.crossover_prob_spin = QDoubleSpinBox()
+        self.crossover_prob_spin.setMinimum(0.1)
+        self.crossover_prob_spin.setMaximum(1.0)
+        self.crossover_prob_spin.setValue(0.9)
+        self.crossover_prob_spin.setSingleStep(0.1)
+        self.crossover_prob_spin.setDecimals(2)
+        self.crossover_prob_spin.valueChanged.connect(lambda: self._mark_param_modified('crossover_prob'))
+        
+        self.crossover_eta_spin = QDoubleSpinBox()
+        self.crossover_eta_spin.setMinimum(1.0)
+        self.crossover_eta_spin.setMaximum(50.0)
+        self.crossover_eta_spin.setValue(15.0)
+        self.crossover_eta_spin.setSingleStep(1.0)
+        self.crossover_eta_spin.setDecimals(1)
+        self.crossover_eta_spin.valueChanged.connect(lambda: self._mark_param_modified('crossover_eta'))
+        
+        # Mutation Parameters
+        self.mutation_prob_spin = QDoubleSpinBox()
+        self.mutation_prob_spin.setMinimum(0.01)
+        self.mutation_prob_spin.setMaximum(0.5)
+        self.mutation_prob_spin.setValue(0.1)
+        self.mutation_prob_spin.setSingleStep(0.01)
+        self.mutation_prob_spin.setDecimals(3)
+        self.mutation_prob_spin.valueChanged.connect(lambda: self._mark_param_modified('mutation_prob'))
+        
+        self.mutation_eta_spin = QDoubleSpinBox()
+        self.mutation_eta_spin.setMinimum(1.0)
+        self.mutation_eta_spin.setMaximum(100.0)
+        self.mutation_eta_spin.setValue(20.0)
+        self.mutation_eta_spin.setSingleStep(1.0)
+        self.mutation_eta_spin.setDecimals(1)
+        self.mutation_eta_spin.valueChanged.connect(lambda: self._mark_param_modified('mutation_eta'))
+        
+        # DE specific parameters
+        self.de_differential_weight_spin = QDoubleSpinBox()
+        self.de_differential_weight_spin.setMinimum(0.1)
+        self.de_differential_weight_spin.setMaximum(2.0)
+        self.de_differential_weight_spin.setValue(0.5)
+        self.de_differential_weight_spin.setSingleStep(0.1)
+        self.de_differential_weight_spin.setDecimals(2)
+        
+        self.de_crossover_rate_spin = QDoubleSpinBox()
+        self.de_crossover_rate_spin.setMinimum(0.1)
+        self.de_crossover_rate_spin.setMaximum(1.0)
+        self.de_crossover_rate_spin.setValue(0.7)
+        self.de_crossover_rate_spin.setSingleStep(0.1)
+        self.de_crossover_rate_spin.setDecimals(2)
+        
+        # MOEA/D specific parameters
+        self.moead_neighbor_size_spin = QSpinBox()
+        self.moead_neighbor_size_spin.setMinimum(5)
+        self.moead_neighbor_size_spin.setMaximum(50)
+        self.moead_neighbor_size_spin.setValue(20)
+        
+        self.moead_decomposition_combo = QComboBox()
+        self.moead_decomposition_combo.addItems(["Weighted Sum", "Tchebycheff", "PBI"])
+        self.moead_decomposition_combo.setCurrentText("Tchebycheff")
+        
+        # CMA-ES specific parameters
+        self.cmaes_sigma_spin = QDoubleSpinBox()
+        self.cmaes_sigma_spin.setMinimum(0.01)
+        self.cmaes_sigma_spin.setMaximum(1.0)
+        self.cmaes_sigma_spin.setValue(0.3)
+        self.cmaes_sigma_spin.setSingleStep(0.05)
+        self.cmaes_sigma_spin.setDecimals(3)
+        
+        # Selection and Survival (common for genetic algorithms)
+        self.selection_combo = QComboBox()
+        self.selection_combo.addItems(["Tournament Selection", "Random Selection"])
+        self.selection_combo.setCurrentText("Tournament Selection")
+        
+        self.tournament_size_spin = QSpinBox()
+        self.tournament_size_spin.setMinimum(2)
+        self.tournament_size_spin.setMaximum(10)
+        self.tournament_size_spin.setValue(2)
+        
+        # Common settings
+        self.eliminate_duplicates_check = QCheckBox()
+        self.eliminate_duplicates_check.setChecked(False)
+        self.eliminate_duplicates_check.stateChanged.connect(lambda: self._mark_param_modified('eliminate_duplicates'))
+
+    def _init_algorithm_parameter_mapping(self):
+        """初始化算法参数映射"""
+        self.algorithm_params = {
+            "NSGA-II": [
+                ("Crossover Probability:", self.crossover_prob_spin),
+                ("Crossover Eta (η_c):", self.crossover_eta_spin),
+                ("Mutation Probability:", self.mutation_prob_spin),
+                ("Mutation Eta (η_m):", self.mutation_eta_spin),
+                ("Selection Method:", self.selection_combo),
+                ("Tournament Size:", self.tournament_size_spin),
+                ("Eliminate Duplicates:", self.eliminate_duplicates_check),
+            ],
+            "NSGA-III": [
+                ("Crossover Probability:", self.crossover_prob_spin),
+                ("Crossover Eta (η_c):", self.crossover_eta_spin),
+                ("Mutation Probability:", self.mutation_prob_spin),
+                ("Mutation Eta (η_m):", self.mutation_eta_spin),
+                ("Selection Method:", self.selection_combo),
+                ("Tournament Size:", self.tournament_size_spin),
+                ("Eliminate Duplicates:", self.eliminate_duplicates_check),
+            ],
+            "SPEA2": [
+                ("Crossover Probability:", self.crossover_prob_spin),
+                ("Crossover Eta (η_c):", self.crossover_eta_spin),
+                ("Mutation Probability:", self.mutation_prob_spin),
+                ("Mutation Eta (η_m):", self.mutation_eta_spin),
+                ("Selection Method:", self.selection_combo),
+                ("Tournament Size:", self.tournament_size_spin),
+                ("Eliminate Duplicates:", self.eliminate_duplicates_check),
+            ],
+            "MOEA/D": [
+                ("Neighbor Size:", self.moead_neighbor_size_spin),
+                ("Decomposition Method:", self.moead_decomposition_combo),
+                ("Crossover Probability:", self.crossover_prob_spin),
+                ("Crossover Eta (η_c):", self.crossover_eta_spin),
+                ("Mutation Probability:", self.mutation_prob_spin),
+                ("Mutation Eta (η_m):", self.mutation_eta_spin),
+                ("Eliminate Duplicates:", self.eliminate_duplicates_check),
+            ],
+            "CMA-ES": [
+                ("Initial Step Size (σ):", self.cmaes_sigma_spin),
+                ("Eliminate Duplicates:", self.eliminate_duplicates_check),
+            ],
+            "Differential Evolution": [
+                ("Differential Weight (F):", self.de_differential_weight_spin),
+                ("Crossover Rate (CR):", self.de_crossover_rate_spin),
+                ("Eliminate Duplicates:", self.eliminate_duplicates_check),
+            ],
+            "GA (Single-Objective)": [
+                ("Crossover Probability:", self.crossover_prob_spin),
+                ("Crossover Eta (η_c):", self.crossover_eta_spin),
+                ("Mutation Probability:", self.mutation_prob_spin),
+                ("Mutation Eta (η_m):", self.mutation_eta_spin),
+                ("Selection Method:", self.selection_combo),
+                ("Tournament Size:", self.tournament_size_spin),
+                ("Eliminate Duplicates:", self.eliminate_duplicates_check),
+            ]
+        }
+
+    def _update_dynamic_parameters(self, algorithm_name):
+        """根据算法更新动态参数显示"""
+        # 清除当前显示的参数
+        self._clear_dynamic_parameters()
+        
+        # 获取该算法的参数列表
+        if algorithm_name in self.algorithm_params:
+            params = self.algorithm_params[algorithm_name]
+            
+            # 添加算法特定的参数
+            for label, widget in params:
+                self.dynamic_params_layout.addRow(label, widget)
+                self.current_param_widgets.append((label, widget))
+                
+                # 更新参数的工具提示
+                self._update_parameter_tooltips(algorithm_name, label, widget)
+
+    def _clear_dynamic_parameters(self):
+        """清除动态参数区域"""
+        while self.dynamic_params_layout.count():
+            child = self.dynamic_params_layout.takeAt(0)
+            if child.widget():
+                child.widget().setParent(None)
+        self.current_param_widgets.clear()
+
+    def _update_parameter_tooltips(self, algorithm_name, label, widget):
+        """根据算法更新参数的工具提示"""
+        tooltips = {
+            "NSGA-II": {
+                "Crossover Probability:": "交叉概率 (NSGA-II推荐0.8-0.95)",
+                "Crossover Eta (η_c):": "交叉分布指数 (控制探索/开发平衡，NSGA-II推荐10-20)",
+                "Mutation Probability:": "变异概率 (通常设为1/变量数，对帕累托多样性很重要)",
+                "Mutation Eta (η_m):": "变异分布指数 (NSGA-II推荐15-25)",
+                "Selection Method:": "选择方法 (锦标赛选择常用于多目标优化)",
+                "Tournament Size:": "锦标赛大小 (2是标准选择压力)",
+                "Eliminate Duplicates:": "⚠️ 可能减少帕累托前沿多样性"
+            },
+            "NSGA-III": {
+                "Crossover Probability:": "交叉概率 (NSGA-III推荐0.9-0.95，高维目标需要)",
+                "Crossover Eta (η_c):": "交叉分布指数 (多目标推荐较低值5-15，增加探索)",
+                "Mutation Probability:": "变异概率 (多目标优化的关键，保持多样性)",
+                "Mutation Eta (η_m):": "变异分布指数 (多目标推荐10-20)",
+                "Selection Method:": "选择方法 (NSGA-III使用参考点驱动选择)",
+                "Tournament Size:": "锦标赛大小 (多目标常用2-3)",
+                "Eliminate Duplicates:": "⚠️ 对多目标优化应设为FALSE"
+            },
+            "SPEA2": {
+                "Crossover Probability:": "交叉概率 (SPEA2推荐0.8-0.9)",
+                "Crossover Eta (η_c):": "交叉分布指数 (SPEA2平衡探索/开发，推荐10-15)",
+                "Mutation Probability:": "变异概率 (SPEA2结合外部档案)",
+                "Mutation Eta (η_m):": "变异分布指数 (SPEA2推荐15-20)",
+                "Selection Method:": "选择方法 (SPEA2有自己的适应度分配机制)",
+                "Tournament Size:": "锦标赛大小 (SPEA2常用2)",
+                "Eliminate Duplicates:": "SPEA2比NSGA-II更好处理重复解"
+            },
+            "MOEA/D": {
+                "Neighbor Size:": "邻域大小 (MOEA/D关键参数，通常为总体大小的10-30%)",
+                "Decomposition Method:": "分解方法 (Tchebycheff常用，PBI适合凹问题)",
+                "Crossover Probability:": "交叉概率 (MOEA/D推荐0.9-0.95)",
+                "Crossover Eta (η_c):": "交叉分布指数 (MOEA/D局部搜索，推荐15-25)",
+                "Mutation Probability:": "变异概率 (MOEA/D邻域内微调)",
+                "Mutation Eta (η_m):": "变异分布指数 (MOEA/D推荐20-30)",
+                "Eliminate Duplicates:": "保持FALSE以维持分解结构"
+            },
+            "CMA-ES": {
+                "Initial Step Size (σ):": "初始步长 (CMA-ES关键参数，通常为搜索范围的1/3)",
+                "Eliminate Duplicates:": "CMA-ES采样分布使重复解较少见"
+            },
+            "Differential Evolution": {
+                "Differential Weight (F):": "差分权重 (DE核心参数，0.4-0.8典型值，控制变异强度)",
+                "Crossover Rate (CR):": "交叉率 (DE交叉概率，0.5-0.9推荐)",
+                "Eliminate Duplicates:": "DE可从去重中受益"
+            },
+            "GA (Single-Objective)": {
+                "Crossover Probability:": "交叉概率 (单目标GA推荐0.7-0.9)",
+                "Crossover Eta (η_c):": "交叉分布指数 (单目标可用较高值15-25)",
+                "Mutation Probability:": "变异概率 (单目标GA通常为1/变量数)",
+                "Mutation Eta (η_m):": "变异分布指数 (单目标推荐20-30)",
+                "Selection Method:": "选择方法 (单目标常用锦标赛选择)",
+                "Tournament Size:": "锦标赛大小 (单目标可用较大值2-5)",
+                "Eliminate Duplicates:": "推荐启用以提高单目标收敛"
+            }
+        }
+        
+        if algorithm_name in tooltips and label in tooltips[algorithm_name]:
+            widget.setToolTip(tooltips[algorithm_name][label])
 
 
 if __name__ == '__main__':

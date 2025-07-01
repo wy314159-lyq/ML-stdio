@@ -3,9 +3,11 @@ Main window for MatSci-ML Studio
 """
 
 import sys
+import os
+import json
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QVBoxLayout, 
                             QWidget, QMenuBar, QStatusBar, QAction, QMessageBox,
-                            QFileDialog, QProgressBar)
+                            QFileDialog, QProgressBar, QHBoxLayout)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QIcon, QFont
 
@@ -29,12 +31,16 @@ class MatSciMLStudioWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
+        self.current_project_path = None  # Track current project file
+        self.recent_projects = []  # Track recent projects
+        self.auto_save_enabled = True  # Auto-save feature
+        self.project_modified = False  # Track if project has been modified
         self.init_ui()
         self.setup_modules()
         
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("AutoMatFlow Studio v1.0")
+        self.setWindowTitle("AutoMatFlow v1.0")
         self.setGeometry(100, 100, 1400, 900)
         
         # Set application font
@@ -339,7 +345,7 @@ class MatSciMLStudioWindow(QMainWindow):
         user_guide_action.triggered.connect(self.show_user_guide)
         help_menu.addAction(user_guide_action)
         
-        about_action = QAction("About AutoMatFlow Studio", self)
+        about_action = QAction("About AutoMatFlow", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
     
@@ -594,32 +600,103 @@ class MatSciMLStudioWindow(QMainWindow):
             self.update_status("New project created")
             
     def save_project(self):
-        """Save project"""
+        """Save project with complete state information"""
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Save Project", "", "AutoMatFlow Projects (*.mml)"
         )
         
         if file_path:
             try:
-                # TODO: Implement project saving
+                # Collect project state from all modules
+                project_state = self._collect_project_state()
+                
+                # Save to JSON format
+                import json
+                import os
+                from datetime import datetime
+                
+                # Add metadata
+                project_state['metadata'] = {
+                    'version': '1.0',
+                    'created_date': datetime.now().isoformat(),
+                    'software_version': 'AutoMatFlow v1.0',
+                    'project_name': os.path.splitext(os.path.basename(file_path))[0]
+                }
+                
+                # Write to file
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(project_state, f, indent=2, ensure_ascii=False)
+                
+                # Store current project path and add to recent projects
+                self.current_project_path = file_path
+                self._add_to_recent_projects(file_path)
+                self._mark_project_saved()
+                
                 self.update_status(f"Project saved to {file_path}")
-                QMessageBox.information(self, "Success", "Project saved successfully!")
+                QMessageBox.information(self, "Success", 
+                                      f"Project saved successfully!\n\nLocation: {file_path}\n"
+                                      f"Modules saved: {len(project_state.get('modules', {}))}")
+                
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to save project: {str(e)}")
+                import traceback
+                error_details = traceback.format_exc()
+                print(f"Save project error: {error_details}")
+                QMessageBox.critical(self, "Error", 
+                                   f"Failed to save project: {str(e)}\n\n"
+                                   f"Please ensure you have write permissions to the selected location.")
                 
     def load_project(self):
-        """Load project"""
+        """Load project and restore complete state"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Load Project", "", "AutoMatFlow Projects (*.mml)"
         )
         
         if file_path:
             try:
-                # TODO: Implement project loading
+                # Read project file
+                import json
+                import os
+                
+                if not os.path.exists(file_path):
+                    raise FileNotFoundError(f"Project file not found: {file_path}")
+                
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    project_state = json.load(f)
+                
+                # Validate project format
+                if not isinstance(project_state, dict):
+                    raise ValueError("Invalid project file format")
+                
+                # Check version compatibility
+                metadata = project_state.get('metadata', {})
+                project_version = metadata.get('version', '1.0')
+                
+                # Restore project state
+                self._restore_project_state(project_state, file_path)
+                
+                # Store current project path and add to recent projects
+                self.current_project_path = file_path
+                self._add_to_recent_projects(file_path)
+                self._mark_project_saved()
+                
+                # Update project name in title
+                project_name = metadata.get('project_name', os.path.splitext(os.path.basename(file_path))[0])
+                self.setWindowTitle(f"AutoMatFlow v1.0 - {project_name}")
+                
                 self.update_status(f"Project loaded from {file_path}")
-                QMessageBox.information(self, "Success", "Project loaded successfully!")
+                QMessageBox.information(self, "Success", 
+                                      f"Project loaded successfully!\n\n"
+                                      f"Project: {project_name}\n"
+                                      f"Created: {metadata.get('created_date', 'Unknown')}\n"
+                                      f"Modules restored: {len(project_state.get('modules', {}))}")
+                
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load project: {str(e)}")
+                import traceback
+                error_details = traceback.format_exc()
+                print(f"Load project error: {error_details}")
+                QMessageBox.critical(self, "Error", 
+                                   f"Failed to load project: {str(e)}\n\n"
+                                   f"Please ensure the file is a valid AutoMatFlow project file.")
                 
     def reset_layout(self):
         """Reset window layout"""
@@ -638,16 +715,16 @@ class MatSciMLStudioWindow(QMainWindow):
     def show_about(self):
         """Show about dialog"""
         about_text = """
-        <h2>AutoMatFlow Studio v1.0</h2>
+        <h2>AutoMatFlow v1.0</h2>
         This software is developed by Dr. Yu Wang from Sichuan University. Welcome to use! If you have any questions or bugs, please contact the email 1255201958@qq.com
         """
         
-        QMessageBox.about(self, "About AutoMatFlow Studio", about_text)
+        QMessageBox.about(self, "About AutoMatFlow", about_text)
         
     def show_user_guide(self):
         """Show user guide"""
         guide_text = """
-        <h2>AutoMatFlow Studio User Guide</h2>
+        <h2>AutoMatFlow User Guide</h2>
         
         <h3>Module 1: Data & Preprocessing</h3>
         <p>Import your materials data from CSV or Excel files. Explore data quality, 
@@ -788,36 +865,58 @@ class MatSciMLStudioWindow(QMainWindow):
             QMessageBox.warning(self, "Error", f"Failed to export report: {str(e)}")
     
     def update_recent_projects_menu(self, menu):
-        """Update recent projects menu"""
+        """Update recent projects menu with actual recent project files"""
         try:
-            # This would typically load from settings/config file
-            recent_projects = ["Project_1.json", "Experiment_A.json", "Analysis_B.json"]
+            menu.clear()
             
-            if not recent_projects:
-                no_recent_action = QAction("No recent projects", self)
-                no_recent_action.setEnabled(False)
-                menu.addAction(no_recent_action)
-            else:
-                for project in recent_projects[:5]:  # Show only last 5
-                    action = QAction(project, self)
-                    action.triggered.connect(lambda checked, p=project: self.load_recent_project(p))
+            # Load recent projects from settings
+            self._load_recent_projects()
+            
+            if self.recent_projects:
+                for project_path in self.recent_projects[:10]:  # Show max 10 recent projects
+                    project_name = os.path.basename(project_path)
+                    action = QAction(project_name, self)
+                    action.setToolTip(project_path)  # Show full path as tooltip
+                    action.triggered.connect(lambda checked, p=project_path: self.load_recent_project(p))
                     menu.addAction(action)
                 
                 menu.addSeparator()
                 clear_action = QAction("Clear Recent Projects", self)
                 clear_action.triggered.connect(self.clear_recent_projects)
                 menu.addAction(clear_action)
+            else:
+                no_projects_action = QAction("No Recent Projects", self)
+                no_projects_action.setEnabled(False)
+                menu.addAction(no_projects_action)
+                
         except Exception as e:
-            print(f"Error updating recent projects menu: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to update recent projects: {str(e)}")
     
-    def load_recent_project(self, project_name):
-        """Load a recent project"""
+    def load_recent_project(self, project_path):
+        """Load a recent project from file path"""
         try:
-            self.update_status(f"Loading recent project: {project_name}")
-            # Implementation would load the actual project file
-            QMessageBox.information(self, "Load Project", f"Project '{project_name}' loaded successfully!")
+            import json
+            import os
+            
+            if os.path.exists(project_path):
+                # Use the existing load_project logic
+                with open(project_path, 'r', encoding='utf-8') as f:
+                    project_state = json.load(f)
+                
+                self._restore_project_state(project_state, project_path)
+                self.current_project_path = project_path
+                self._add_to_recent_projects(project_path)
+                
+                project_name = os.path.splitext(os.path.basename(project_path))[0]
+                self.update_status(f"Loaded recent project: {project_name}")
+                QMessageBox.information(self, "Load Project", f"Project '{project_name}' loaded successfully!")
+            else:
+                QMessageBox.warning(self, "Project Not Found", 
+                                  f"The project file could not be found:\n{project_path}\n\n"
+                                  f"It may have been moved or deleted.")
+                self._remove_from_recent_projects(project_path)
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to load project: {str(e)}")
+            QMessageBox.warning(self, "Error", f"Failed to load recent project: {str(e)}")
     
     def clear_recent_projects(self):
         """Clear recent projects list"""
@@ -826,6 +925,8 @@ class MatSciMLStudioWindow(QMainWindow):
                                        'Are you sure you want to clear the recent projects list?',
                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
+                self.recent_projects.clear()
+                self._save_recent_projects()
                 self.update_status("Recent projects list cleared")
                 QMessageBox.information(self, "Clear Recent Projects", "Recent projects list cleared!")
         except Exception as e:
@@ -1147,7 +1248,7 @@ class MatSciMLStudioWindow(QMainWindow):
             from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton
             
             dialog = QDialog(self)
-            dialog.setWindowTitle("Welcome to AutoMatFlow Studio")
+            dialog.setWindowTitle("Welcome to AutoMatFlow")
             dialog.setModal(True)
             dialog.resize(600, 500)
             
@@ -1155,7 +1256,7 @@ class MatSciMLStudioWindow(QMainWindow):
             
             # Welcome content
             welcome_text = """
-            <h2>Welcome to AutoMatFlow Studio v1.0</h2>
+            <h2>Welcome to AutoMatFlow v1.0</h2>
             
             <h3>Getting Started:</h3>
             <ol>
@@ -1268,11 +1369,410 @@ class MatSciMLStudioWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to open issue reporting: {str(e)}")
 
+    # ========== PROJECT STATE MANAGEMENT ==========
+    
+    def _collect_project_state(self):
+        """Collect comprehensive project state from all modules"""
+        project_state = {
+            'modules': {},
+            'ui_state': {},
+            'settings': {}
+        }
+        
+        try:
+            # Data Module State
+            if hasattr(self, 'data_module') and self.data_module:
+                data_state = {}
+                if hasattr(self.data_module, 'file_path_edit') and self.data_module.file_path_edit.text():
+                    data_state['data_file_path'] = self.data_module.file_path_edit.text()
+                if hasattr(self.data_module, 'selected_target') and self.data_module.selected_target:
+                    data_state['selected_target'] = self.data_module.selected_target
+                if hasattr(self.data_module, 'selected_features') and self.data_module.selected_features:
+                    data_state['selected_features'] = self.data_module.selected_features
+                if hasattr(self.data_module, 'encoding_applied'):
+                    data_state['encoding_applied'] = self.data_module.encoding_applied
+                
+                # Save current data info if available
+                if hasattr(self.data_module, 'df') and self.data_module.df is not None:
+                    data_state['data_shape'] = list(self.data_module.df.shape)
+                    data_state['column_names'] = list(self.data_module.df.columns)
+                    data_state['data_types'] = {col: str(dtype) for col, dtype in self.data_module.df.dtypes.items()}
+                
+                project_state['modules']['data_module'] = data_state
+            
+            # Feature Module State
+            if hasattr(self, 'feature_module') and self.feature_module:
+                feature_state = {}
+                if hasattr(self.feature_module, 'selected_features') and self.feature_module.selected_features:
+                    feature_state['selected_features'] = self.feature_module.selected_features
+                if hasattr(self.feature_module, 'feature_importance_results'):
+                    feature_state['has_feature_analysis'] = True
+                
+                project_state['modules']['feature_module'] = feature_state
+            
+            # Training Module State
+            if hasattr(self, 'training_module') and self.training_module:
+                training_state = {}
+                if hasattr(self.training_module, 'trained_pipeline') and self.training_module.trained_pipeline:
+                    # Save model to temporary location and store path
+                    import tempfile
+                    import joblib
+                    import os
+                    import time
+                    
+                    temp_dir = tempfile.gettempdir()
+                    model_filename = f"automat_model_{int(time.time())}.joblib"
+                    model_path = os.path.join(temp_dir, model_filename)
+                    
+                    try:
+                        joblib.dump({
+                            'model': self.training_module.trained_pipeline,
+                            'feature_names': getattr(self.training_module, 'feature_names', []),
+                            'task_type': getattr(self.training_module, 'task_type', 'regression')
+                        }, model_path)
+                        training_state['model_path'] = model_path
+                        training_state['has_trained_model'] = True
+                    except Exception as e:
+                        print(f"Warning: Could not save model state: {e}")
+                        training_state['has_trained_model'] = False
+                
+                if hasattr(self.training_module, 'task_type'):
+                    training_state['task_type'] = self.training_module.task_type
+                if hasattr(self.training_module, 'model_combo') and self.training_module.model_combo.currentText():
+                    training_state['selected_model'] = self.training_module.model_combo.currentText()
+                
+                project_state['modules']['training_module'] = training_state
+            
+            # Prediction Module State
+            if hasattr(self, 'prediction_module') and self.prediction_module:
+                prediction_state = {}
+                if hasattr(self.prediction_module, 'model_path_edit') and self.prediction_module.model_path_edit.text():
+                    prediction_state['model_path'] = self.prediction_module.model_path_edit.text()
+                if hasattr(self.prediction_module, 'data_path_edit') and self.prediction_module.data_path_edit.text():
+                    prediction_state['prediction_data_path'] = self.prediction_module.data_path_edit.text()
+                
+                project_state['modules']['prediction_module'] = prediction_state
+            
+            # Active Learning State
+            if hasattr(self, 'active_learning_window') and self.active_learning_window:
+                al_state = {}
+                # Store any active learning configurations or results
+                if hasattr(self.active_learning_window, 'current_iteration'):
+                    al_state['current_iteration'] = getattr(self.active_learning_window, 'current_iteration', 0)
+                
+                project_state['modules']['active_learning'] = al_state
+            
+            # UI State
+            project_state['ui_state'] = {
+                'current_tab_index': self.tab_widget.currentIndex(),
+                'window_geometry': {
+                    'width': self.width(),
+                    'height': self.height(),
+                    'x': self.x(),
+                    'y': self.y()
+                },
+                'enabled_tabs': [self.tab_widget.isTabEnabled(i) for i in range(self.tab_widget.count())]
+            }
+            
+            return project_state
+            
+        except Exception as e:
+            print(f"Error collecting project state: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'modules': {}, 'ui_state': {}, 'settings': {}}
+    
+    def _restore_project_state(self, project_state, project_file_path):
+        """Restore project state to all modules"""
+        import time
+        import os
+        
+        try:
+            modules_state = project_state.get('modules', {})
+            ui_state = project_state.get('ui_state', {})
+            
+            # Start with data module restoration
+            if 'data_module' in modules_state:
+                self._restore_data_module_state(modules_state['data_module'], project_file_path)
+                # Allow time for data loading
+                QApplication.processEvents()
+                time.sleep(0.5)
+            
+            # Restore feature module state
+            if 'feature_module' in modules_state:
+                self._restore_feature_module_state(modules_state['feature_module'])
+                QApplication.processEvents()
+            
+            # Restore training module state
+            if 'training_module' in modules_state:
+                self._restore_training_module_state(modules_state['training_module'])
+                QApplication.processEvents()
+            
+            # Restore prediction module state
+            if 'prediction_module' in modules_state:
+                self._restore_prediction_module_state(modules_state['prediction_module'])
+                QApplication.processEvents()
+            
+            # Restore UI state
+            if ui_state:
+                self._restore_ui_state(ui_state)
+            
+            self.update_status("Project state restored successfully")
+            
+        except Exception as e:
+            print(f"Error restoring project state: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.warning(self, "Partial Load", 
+                              f"Project loaded with some limitations: {str(e)}\n\n"
+                              f"Some modules may need to be reconfigured manually.")
+    
+    def _restore_data_module_state(self, data_state, project_file_path):
+        """Restore data module state"""
+        try:
+            if 'data_file_path' in data_state and os.path.exists(data_state['data_file_path']):
+                # Restore data file path and load data
+                self.data_module.file_path_edit.setText(data_state['data_file_path'])
+                self.data_module.import_data()
+                
+                # Restore target and feature selections after data loads
+                if 'selected_target' in data_state:
+                    # Find and set target in combo box
+                    target_combo = getattr(self.data_module, 'target_combo', None)
+                    if target_combo:
+                        index = target_combo.findText(data_state['selected_target'])
+                        if index >= 0:
+                            target_combo.setCurrentIndex(index)
+                            self.data_module.selected_target = data_state['selected_target']
+                
+                print(f"✓ Data module state restored: {data_state.get('data_file_path', 'N/A')}")
+            else:
+                print(f"⚠ Data file not found: {data_state.get('data_file_path', 'N/A')}")
+                
+        except Exception as e:
+            print(f"Error restoring data module: {e}")
+    
+    def _restore_feature_module_state(self, feature_state):
+        """Restore feature module state"""
+        try:
+            if 'selected_features' in feature_state:
+                # This will be handled when data flows through the pipeline
+                print(f"✓ Feature selections available for restoration")
+        except Exception as e:
+            print(f"Error restoring feature module: {e}")
+    
+    def _restore_training_module_state(self, training_state):
+        """Restore training module state"""
+        try:
+            if 'model_path' in training_state and os.path.exists(training_state['model_path']):
+                # Load saved model
+                import joblib
+                model_data = joblib.load(training_state['model_path'])
+                
+                if hasattr(self.training_module, 'trained_pipeline'):
+                    self.training_module.trained_pipeline = model_data.get('model')
+                    
+                # Set task type if available
+                if 'task_type' in training_state:
+                    if hasattr(self.training_module, 'task_type_combo'):
+                        self.training_module.task_type_combo.setCurrentText(training_state['task_type'].title())
+                
+                # Set selected model if available
+                if 'selected_model' in training_state:
+                    if hasattr(self.training_module, 'model_combo'):
+                        index = self.training_module.model_combo.findText(training_state['selected_model'])
+                        if index >= 0:
+                            self.training_module.model_combo.setCurrentIndex(index)
+                
+                print(f"✓ Training module state restored")
+                
+        except Exception as e:
+            print(f"Error restoring training module: {e}")
+    
+    def _restore_prediction_module_state(self, prediction_state):
+        """Restore prediction module state"""
+        try:
+            if 'model_path' in prediction_state and os.path.exists(prediction_state['model_path']):
+                self.prediction_module.model_path_edit.setText(prediction_state['model_path'])
+                
+            if 'prediction_data_path' in prediction_state and os.path.exists(prediction_state['prediction_data_path']):
+                self.prediction_module.data_path_edit.setText(prediction_state['prediction_data_path'])
+                
+            print(f"✓ Prediction module state restored")
+            
+        except Exception as e:
+            print(f"Error restoring prediction module: {e}")
+    
+    def _restore_ui_state(self, ui_state):
+        """Restore UI state"""
+        try:
+            # Restore window geometry
+            if 'window_geometry' in ui_state:
+                geom = ui_state['window_geometry']
+                self.setGeometry(geom.get('x', 100), geom.get('y', 100), 
+                               geom.get('width', 1400), geom.get('height', 900))
+            
+            # Restore enabled tabs
+            if 'enabled_tabs' in ui_state:
+                enabled_tabs = ui_state['enabled_tabs']
+                for i, enabled in enumerate(enabled_tabs):
+                    if i < self.tab_widget.count():
+                        self.tab_widget.setTabEnabled(i, enabled)
+            
+            # Restore current tab (do this last)
+            if 'current_tab_index' in ui_state:
+                tab_index = ui_state['current_tab_index']
+                if 0 <= tab_index < self.tab_widget.count():
+                    self.tab_widget.setCurrentIndex(tab_index)
+            
+            print(f"✓ UI state restored")
+            
+        except Exception as e:
+            print(f"Error restoring UI state: {e}")
+
+    # ========== RECENT PROJECTS MANAGEMENT ==========
+    
+    def _add_to_recent_projects(self, project_path):
+        """Add a project to the recent projects list"""
+        try:
+            import os
+            
+            # Convert to absolute path
+            project_path = os.path.abspath(project_path)
+            
+            # Remove if already exists
+            if project_path in self.recent_projects:
+                self.recent_projects.remove(project_path)
+            
+            # Add to beginning of list
+            self.recent_projects.insert(0, project_path)
+            
+            # Keep only the last 10 projects
+            self.recent_projects = self.recent_projects[:10]
+            
+            # Save to persistent storage
+            self._save_recent_projects()
+            
+        except Exception as e:
+            print(f"Error adding to recent projects: {e}")
+    
+    def _remove_from_recent_projects(self, project_path):
+        """Remove a project from the recent projects list"""
+        try:
+            if project_path in self.recent_projects:
+                self.recent_projects.remove(project_path)
+                self._save_recent_projects()
+        except Exception as e:
+            print(f"Error removing from recent projects: {e}")
+    
+    def _load_recent_projects(self):
+        """Load recent projects from settings file"""
+        try:
+            import json
+            import os
+            
+            settings_dir = os.path.expanduser("~/.automatflow")
+            settings_file = os.path.join(settings_dir, "recent_projects.json")
+            
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.recent_projects = data.get('recent_projects', [])
+                    
+                    # Filter out non-existent files
+                    self.recent_projects = [p for p in self.recent_projects if os.path.exists(p)]
+            else:
+                self.recent_projects = []
+                
+        except Exception as e:
+            print(f"Error loading recent projects: {e}")
+            self.recent_projects = []
+    
+    def _save_recent_projects(self):
+        """Save recent projects to settings file"""
+        try:
+            import json
+            import os
+            
+            settings_dir = os.path.expanduser("~/.automatflow")
+            if not os.path.exists(settings_dir):
+                os.makedirs(settings_dir)
+            
+            settings_file = os.path.join(settings_dir, "recent_projects.json")
+            
+            data = {
+                'recent_projects': self.recent_projects,
+                'auto_save_enabled': self.auto_save_enabled
+            }
+            
+            with open(settings_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                
+        except Exception as e:
+            print(f"Error saving recent projects: {e}")
+
+    # ========== AUTO-SAVE FUNCTIONALITY ==========
+    
+    def _mark_project_modified(self):
+        """Mark the current project as modified"""
+        self.project_modified = True
+        
+        # Update window title to show modification
+        if self.current_project_path:
+            project_name = os.path.splitext(os.path.basename(self.current_project_path))[0]
+            self.setWindowTitle(f"AutoMatFlow v1.0 - {project_name} *")
+        else:
+            self.setWindowTitle("AutoMatFlow v1.0 - Untitled Project *")
+    
+    def _mark_project_saved(self):
+        """Mark the current project as saved"""
+        self.project_modified = False
+        
+        # Update window title to remove modification indicator
+        if self.current_project_path:
+            project_name = os.path.splitext(os.path.basename(self.current_project_path))[0]
+            self.setWindowTitle(f"AutoMatFlow v1.0 - {project_name}")
+        else:
+            self.setWindowTitle("AutoMatFlow v1.0")
+    
+    def _auto_save_project(self):
+        """Automatically save the project if auto-save is enabled"""
+        try:
+            if self.auto_save_enabled and self.project_modified and self.current_project_path:
+                # Perform auto-save without user interaction
+                project_state = self._collect_project_state()
+                
+                # Add metadata
+                from datetime import datetime
+                project_state['metadata'] = {
+                    'version': '1.0',
+                    'last_modified': datetime.now().isoformat(),
+                    'software_version': 'AutoMatFlow v1.0',
+                    'project_name': os.path.splitext(os.path.basename(self.current_project_path))[0],
+                    'auto_saved': True
+                }
+                
+                # Create backup file
+                backup_path = self.current_project_path + '.backup'
+                import shutil
+                if os.path.exists(self.current_project_path):
+                    shutil.copy2(self.current_project_path, backup_path)
+                
+                # Save to file
+                with open(self.current_project_path, 'w', encoding='utf-8') as f:
+                    json.dump(project_state, f, indent=2, ensure_ascii=False)
+                
+                self._mark_project_saved()
+                self.update_status("Project auto-saved")
+                
+        except Exception as e:
+            print(f"Auto-save failed: {e}")
+
 
 def main():
     """Main application entry point"""
     app = QApplication(sys.argv)
-    app.setApplicationName("AutoMatFlow Studio")
+    app.setApplicationName("AutoMatFlow")
     app.setApplicationVersion("1.0")
     
     # Set application style
