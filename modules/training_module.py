@@ -112,12 +112,12 @@ class TrainingModule(QWidget):
         left_layout.addWidget(model_group)
         
         # Training configuration
-        config_group = QGroupBox("训练配置")
+        config_group = QGroupBox("Training Configuration")
         config_layout = QVBoxLayout(config_group)
         
         # Test size
         test_size_layout = QHBoxLayout()
-        test_size_layout.addWidget(QLabel("测试集比例:"))
+        test_size_layout.addWidget(QLabel("Test Set Ratio:"))
         self.test_size_spin = QDoubleSpinBox()
         self.test_size_spin.setMinimum(0.1)
         self.test_size_spin.setMaximum(0.5)
@@ -128,7 +128,7 @@ class TrainingModule(QWidget):
         
         # Random state
         random_state_layout = QHBoxLayout()
-        random_state_layout.addWidget(QLabel("随机种子:"))
+        random_state_layout.addWidget(QLabel("Random Seed:"))
         self.random_state_spin = QSpinBox()
         self.random_state_spin.setMinimum(0)
         self.random_state_spin.setMaximum(999)
@@ -138,12 +138,12 @@ class TrainingModule(QWidget):
         
         # Evaluation strategy
         eval_strategy_layout = QHBoxLayout()
-        eval_strategy_layout.addWidget(QLabel("评估策略:"))
+        eval_strategy_layout.addWidget(QLabel("Evaluation Strategy:"))
         self.eval_strategy_combo = QComboBox()
         self.eval_strategy_combo.addItems([
-            "单次划分 (快速)",
-            "多次划分验证 (推荐)",
-            "嵌套交叉验证 (最可靠)"
+            "Single Split (Fast)",
+            "Multiple Splits (Recommended)",
+            "Nested Cross-Validation (Most Reliable)"
         ])
         self.eval_strategy_combo.setCurrentIndex(1)  # Default to multiple splits
         eval_strategy_layout.addWidget(self.eval_strategy_combo)
@@ -339,7 +339,7 @@ class TrainingModule(QWidget):
                     self.class_names = self.label_encoder.classes_
                     
                     print(f"Applied encoding: {dict(zip(self.class_names, range(len(self.class_names))))}")
-                    self.status_updated.emit(f"目标变量已编码: {dict(zip(self.class_names, range(len(self.class_names))))}")
+                    self.status_updated.emit(f"Target variable encoded: {dict(zip(self.class_names, range(len(self.class_names))))}")
                     
             except Exception as e:
                 print(f"ERROR in target variable processing: {str(e)}")
@@ -793,7 +793,7 @@ class TrainingModule(QWidget):
             self.progress_updated.emit(80)
             
             # Evaluate model
-            self.status_updated.emit("正在评估模型...")
+            self.status_updated.emit("Evaluating model...")
             
             # Predictions on test set
             y_pred = self.trained_pipeline.predict(X_test)

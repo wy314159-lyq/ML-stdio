@@ -1308,7 +1308,7 @@ class MatSciMLStudioWindow(QMainWindow):
         """Open online documentation"""
         try:
             import webbrowser
-            webbrowser.open("https://github.com/your-repo/automatflow-studio/wiki")
+            webbrowser.open("https://github.com/wy314159-lyq/ML-stdio.git")
             self.update_status("Opened online documentation")
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to open online documentation: {str(e)}")
@@ -1720,9 +1720,9 @@ class MatSciMLStudioWindow(QMainWindow):
         # Update window title to show modification
         if self.current_project_path:
             project_name = os.path.splitext(os.path.basename(self.current_project_path))[0]
-            self.setWindowTitle(f"AutoMatFlow v1.0 - {project_name} *")
+            self.setWindowTitle(f"MatSci-ML Studio v1.0 - {project_name} *")
         else:
-            self.setWindowTitle("AutoMatFlow v1.0 - Untitled Project *")
+            self.setWindowTitle("MatSci-ML Studio v1.0 - Untitled Project *")
     
     def _mark_project_saved(self):
         """Mark the current project as saved"""
@@ -1731,9 +1731,9 @@ class MatSciMLStudioWindow(QMainWindow):
         # Update window title to remove modification indicator
         if self.current_project_path:
             project_name = os.path.splitext(os.path.basename(self.current_project_path))[0]
-            self.setWindowTitle(f"AutoMatFlow v1.0 - {project_name}")
+            self.setWindowTitle(f"MatSci-ML Studio v1.0 - {project_name}")
         else:
-            self.setWindowTitle("AutoMatFlow v1.0")
+            self.setWindowTitle("MatSci-ML Studio v1.0")
     
     def _auto_save_project(self):
         """Automatically save the project if auto-save is enabled"""
@@ -1747,7 +1747,7 @@ class MatSciMLStudioWindow(QMainWindow):
                 project_state['metadata'] = {
                     'version': '1.0',
                     'last_modified': datetime.now().isoformat(),
-                    'software_version': 'AutoMatFlow v1.0',
+                    'software_version': 'MatSci-ML Studio v1.0',
                     'project_name': os.path.splitext(os.path.basename(self.current_project_path))[0],
                     'auto_saved': True
                 }
@@ -1772,7 +1772,7 @@ class MatSciMLStudioWindow(QMainWindow):
 def main():
     """Main application entry point"""
     app = QApplication(sys.argv)
-    app.setApplicationName("AutoMatFlow")
+    app.setApplicationName("MatSci-ML Studio")
     app.setApplicationVersion("1.0")
     
     # Set application style

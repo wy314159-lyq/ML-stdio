@@ -451,7 +451,9 @@ Threading Architecture:
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Active Learning & Optimization")
-        self.setGeometry(100, 100, 1400, 900)
+        
+        # 🔧 实现自适应窗口大小和DPI感知
+        self._setup_adaptive_window_size()
         
         # Data storage
         self.training_data = None
@@ -502,41 +504,400 @@ Threading Architecture:
         # UI components
         self.init_ui()
         
-        # Apply styling
+    def _setup_adaptive_window_size(self):
+        """设置自适应窗口大小，支持不同分辨率和DPI设置"""
+        from PyQt5.QtWidgets import QApplication, QDesktopWidget
+        from PyQt5.QtCore import Qt
+        import sys
+        
+        # 获取屏幕信息
+        desktop = QApplication.desktop()
+        screen_rect = desktop.screenGeometry()
+        screen_width = screen_rect.width()
+        screen_height = screen_rect.height()
+        
+        # 获取DPI信息
+        screen = QApplication.primaryScreen()
+        dpi_ratio = screen.devicePixelRatio() if hasattr(screen, 'devicePixelRatio') else 1.0
+        logical_dpi = screen.logicalDotsPerInch() if hasattr(screen, 'logicalDotsPerInch') else 96
+        
+        # 基于屏幕尺寸计算适当的窗口大小
+        # 使用屏幕的70-85%作为窗口大小，确保在不同分辨率下都有良好的显示效果
+        if screen_width <= 1366:  # 小屏幕/笔记本
+            window_width = int(screen_width * 0.85)
+            window_height = int(screen_height * 0.80)
+            self.adaptive_left_panel_width = 280
+        elif screen_width <= 1920:  # 标准1080p
+            window_width = int(screen_width * 0.75)
+            window_height = int(screen_height * 0.75)
+            self.adaptive_left_panel_width = 320
+        elif screen_width <= 2560:  # 2K分辨率
+            window_width = int(screen_width * 0.70)
+            window_height = int(screen_height * 0.70)
+            self.adaptive_left_panel_width = 380
+        else:  # 4K和更高分辨率
+            window_width = int(screen_width * 0.65)
+            window_height = int(screen_height * 0.65)
+            self.adaptive_left_panel_width = 420
+        
+        # DPI调整：对于高DPI屏幕，适当增加组件大小
+        if logical_dpi > 120:  # 高DPI屏幕
+            dpi_scale_factor = logical_dpi / 96.0
+            self.adaptive_left_panel_width = int(self.adaptive_left_panel_width * min(dpi_scale_factor, 1.5))
+        
+        # 确保窗口不会太小
+        min_width = 1000
+        min_height = 700
+        window_width = max(window_width, min_width)
+        window_height = max(window_height, min_height)
+        
+        # 计算居中位置
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        
+        # 设置窗口几何
+        self.setGeometry(x, y, window_width, window_height)
+        
+        # 设置最小尺寸
+        self.setMinimumSize(min_width, min_height)
+        
+        # 启用自适应布局
+        self.setAttribute(Qt.WA_DontShowOnScreen, False)
+        
+        print(f"🖥️ 屏幕信息: {screen_width}×{screen_height}, DPI: {logical_dpi}, 比例: {dpi_ratio}")
+        print(f"📐 窗口设置: {window_width}×{window_height}, 左侧面板宽度: {self.adaptive_left_panel_width}")
+    
+    def resizeEvent(self, event):
+        """处理窗口大小改变事件，实现响应式布局"""
+        super().resizeEvent(event)
+        
+        # 获取当前窗口大小
+        current_width = self.width()
+        current_height = self.height()
+        
+        # 根据当前窗口大小动态调整左侧面板宽度
+        if hasattr(self, 'adaptive_left_panel_width'):
+            # 计算适当的左侧面板宽度比例
+            if current_width < 1200:
+                panel_ratio = 0.28  # 小窗口时使用更大比例
+            elif current_width < 1600:
+                panel_ratio = 0.25  # 中等窗口
+            else:
+                panel_ratio = 0.22  # 大窗口时使用较小比例
+            
+            new_panel_width = min(int(current_width * panel_ratio), self.adaptive_left_panel_width)
+            new_panel_width = max(new_panel_width, 250)  # 最小宽度
+            
+            # 如果左侧面板存在，更新其宽度
+            if hasattr(self, 'centralWidget') and self.centralWidget():
+                layout = self.centralWidget().layout()
+                if layout and layout.count() > 0:
+                    left_panel = layout.itemAt(0).widget()
+                    if left_panel:
+                        left_panel.setMaximumWidth(new_panel_width)
+        
+        # 更新matplotlib图表大小以适应新的窗口尺寸
+        self._update_plots_for_resize()
+    
+    def _update_plots_for_resize(self):
+        """更新所有matplotlib图表以适应新的窗口尺寸"""
+        try:
+            # 更新主要的matplotlib组件
+            plots_to_update = []
+            
+            # 收集所有需要更新的图表
+            if hasattr(self, 'exploration_plot') and self.exploration_plot:
+                plots_to_update.append(self.exploration_plot)
+            if hasattr(self, 'importance_plot') and self.importance_plot:
+                plots_to_update.append(self.importance_plot)
+            if hasattr(self, 'correlation_plot') and self.correlation_plot:
+                plots_to_update.append(self.correlation_plot)
+            if hasattr(self, 'uncertainty_plot') and self.uncertainty_plot:
+                plots_to_update.append(self.uncertainty_plot)
+            if hasattr(self, 'design_space_plot') and self.design_space_plot:
+                plots_to_update.append(self.design_space_plot)
+            if hasattr(self, 'pareto_plot') and self.pareto_plot:
+                plots_to_update.append(self.pareto_plot)
+            
+            # 更新图表
+            for plot in plots_to_update:
+                if plot and hasattr(plot, 'figure') and plot.figure:
+                    plot.figure.tight_layout()
+                    if hasattr(plot, 'canvas') and plot.canvas:
+                        plot.canvas.draw()
+                        
+        except Exception as e:
+                         # 静默处理错误，避免影响UI操作
+             print(f"🔧 图表更新警告: {e}")
+    
+    def showEvent(self, event):
+        """处理窗口显示事件，确保初始布局正确"""
+        super().showEvent(event)
+        
+        # 延迟执行自适应调整，确保所有组件都已创建
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(100, self._apply_adaptive_adjustments)
+    
+    def _apply_adaptive_adjustments(self):
+        """应用额外的自适应调整"""
+        try:
+            # 调整表格列宽
+            self._adjust_table_columns()
+            
+            # 调整滚动区域
+            self._adjust_scroll_areas()
+            
+        except Exception as e:
+            print(f"🔧 自适应调整警告: {e}")
+    
+    def _adjust_table_columns(self):
+        """调整表格列宽以适应窗口大小"""
+        tables = []
+        
+        # 收集所有表格
+        if hasattr(self, 'results_table') and self.results_table:
+            tables.append(self.results_table)
+        if hasattr(self, 'history_table') and self.history_table:
+            tables.append(self.history_table)
+        if hasattr(self, 'selected_targets_table') and self.selected_targets_table:
+            tables.append(self.selected_targets_table)
+        if hasattr(self, 'pareto_table') and self.pareto_table:
+            tables.append(self.pareto_table)
+        
+        for table in tables:
+            if table and hasattr(table, 'horizontalHeader'):
+                header = table.horizontalHeader()
+                if hasattr(header, 'setStretchLastSection'):
+                    header.setStretchLastSection(True)
+                if hasattr(header, 'setSectionResizeMode'):
+                    from PyQt5.QtWidgets import QHeaderView
+                    # 设置列宽自适应模式
+                    for i in range(table.columnCount()):
+                        if i == table.columnCount() - 1:  # 最后一列拉伸
+                            header.setSectionResizeMode(i, QHeaderView.Stretch)
+                        else:  # 其他列根据内容调整
+                            header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+    
+    def _adjust_scroll_areas(self):
+        """调整滚动区域的行为"""
+        # 确保特征列表有合适的滚动行为
+        if hasattr(self, 'feature_list') and self.feature_list:
+            # 根据窗口高度调整特征列表的最大高度
+            window_height = self.height()
+            if window_height > 800:
+                max_height = min(250, window_height // 4)
+            else:
+                max_height = min(200, window_height // 5)
+            
+            self.feature_list.setMaximumHeight(max_height)
+        
+        # Apply modern font styling consistent with the provided UI design
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #f5f5f5;
+                background-color: #f8f9fa;
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                color: #212529;
             }
             QGroupBox {
-                font-weight: bold;
-                border: 2px solid #cccccc;
-                border-radius: 5px;
-                margin-top: 1ex;
-                padding-top: 10px;
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-weight: 600;
+                font-size: 10pt;
+                color: #343a40;
+                border: 2px solid #dee2e6;
+                border-radius: 6px;
+                margin-top: 12px;
+                padding-top: 12px;
+                background-color: #ffffff;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 10px 0 10px;
+                left: 12px;
+                padding: 0 8px 0 8px;
+                background-color: #ffffff;
+                color: #495057;
             }
             QPushButton {
-                background-color: #e9e9e9;
-                border: 1px solid #cccccc;
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                font-weight: 500;
+                background-color: #ffffff;
+                border: 1px solid #ced4da;
                 border-radius: 4px;
                 padding: 8px 16px;
-                font-size: 12px;
+                color: #495057;
+                min-height: 18px;
             }
             QPushButton:hover {
-                background-color: #d4edda;
-                border-color: #c3e6cb;
+                background-color: #e9ecef;
+                border-color: #adb5bd;
+                color: #212529;
             }
             QPushButton:pressed {
-                background-color: #c3e6cb;
+                background-color: #dee2e6;
+                border-color: #adb5bd;
             }
             QPushButton:disabled {
                 background-color: #f8f9fa;
                 color: #6c757d;
                 border-color: #e9ecef;
+            }
+            QLabel {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                color: #495057;
+            }
+            QComboBox {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                color: #495057;
+                background-color: #ffffff;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                padding: 4px 8px;
+                min-height: 20px;
+            }
+            QComboBox:hover {
+                border-color: #adb5bd;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #6c757d;
+                margin-right: 5px;
+            }
+            QListWidget {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                color: #495057;
+                background-color: #ffffff;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                selection-background-color: #007bff;
+                selection-color: #ffffff;
+            }
+            QListWidget::item {
+                padding: 4px 8px;
+                border-bottom: 1px solid #f8f9fa;
+            }
+            QListWidget::item:hover {
+                background-color: #f8f9fa;
+            }
+            QTableWidget {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                color: #495057;
+                background-color: #ffffff;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                gridline-color: #e9ecef;
+                selection-background-color: #007bff;
+                selection-color: #ffffff;
+            }
+            QTableWidget::item {
+                padding: 6px 8px;
+                border-bottom: 1px solid #f8f9fa;
+            }
+            QHeaderView::section {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                font-weight: 600;
+                background-color: #f8f9fa;
+                color: #495057;
+                border: 1px solid #dee2e6;
+                padding: 8px;
+            }
+            QRadioButton {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                color: #495057;
+                spacing: 8px;
+            }
+            QCheckBox {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                color: #495057;
+                spacing: 8px;
+            }
+            QSpinBox, QDoubleSpinBox {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                color: #495057;
+                background-color: #ffffff;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                padding: 4px 8px;
+                min-height: 20px;
+            }
+            QTabWidget::pane {
+                border: 1px solid #dee2e6;
+                background-color: #ffffff;
+                border-radius: 4px;
+            }
+            QTabBar::tab {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                font-weight: 500;
+                color: #6c757d;
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-bottom: none;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #ffffff;
+                color: #495057;
+                border-bottom: 2px solid #007bff;
+            }
+            QTabBar::tab:hover {
+                background-color: #e9ecef;
+                color: #495057;
+            }
+            QTextEdit {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Consolas', monospace;
+                font-size: 9pt;
+                color: #495057;
+                background-color: #ffffff;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                padding: 8px;
+            }
+            QProgressBar {
+                font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;
+                font-size: 9pt;
+                color: #495057;
+                background-color: #e9ecef;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #007bff;
+                border-radius: 3px;
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #ced4da;
+                height: 6px;
+                background: #e9ecef;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #007bff;
+                border: 1px solid #0056b3;
+                width: 16px;
+                margin: -5px 0;
+                border-radius: 8px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #0056b3;
             }
         """)
     
@@ -548,9 +909,11 @@ Threading Architecture:
         # Main layout: horizontal split
         main_layout = QHBoxLayout(central_widget)
         
-        # Left panel: Controls
+        # Left panel: Controls (使用自适应宽度)
         left_panel = self.create_control_panel()
-        left_panel.setMaximumWidth(350)
+        adaptive_width = getattr(self, 'adaptive_left_panel_width', 350)
+        left_panel.setMaximumWidth(adaptive_width)
+        left_panel.setMinimumWidth(min(280, adaptive_width))
         
         # Right panel: Results
         right_panel = self.create_results_panel()
@@ -591,7 +954,7 @@ Threading Architecture:
             
             # Create Pareto optimal solutions table
             pareto_table_label = QLabel("Pareto Optimal Solutions Details:")
-            pareto_table_label.setStyleSheet("font-weight: bold; font-size: 12px; margin-top: 10px;")
+            pareto_table_label.setStyleSheet("font-weight: 600; font-size: 10pt; margin-top: 10px; color: #495057; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
             pareto_layout.addWidget(pareto_table_label)
             
             self.pareto_table = CustomTableWidget()
@@ -978,7 +1341,7 @@ Threading Architecture:
         self.training_button = QPushButton("Load Training Data")
         self.training_button.clicked.connect(self.load_training_data)
         self.training_label = QLabel("No training data loaded")
-        self.training_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.training_label.setStyleSheet("color: #6c757d; font-size: 9pt; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
         
         data_layout.addWidget(self.training_button)
         data_layout.addWidget(self.training_label)
@@ -987,7 +1350,7 @@ Threading Architecture:
         self.virtual_button = QPushButton("Load Candidate Data")
         self.virtual_button.clicked.connect(self.load_virtual_data)
         self.virtual_label = QLabel("No candidate data loaded")
-        self.virtual_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.virtual_label.setStyleSheet("color: #6c757d; font-size: 9pt; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
         
         data_layout.addWidget(self.virtual_button)
         data_layout.addWidget(self.virtual_label)
@@ -1000,7 +1363,7 @@ Threading Architecture:
         
         # Candidate set generation
         generate_label = QLabel("Or Generate Candidate Set:")
-        generate_label.setStyleSheet("color: #333; font-weight: bold; font-size: 11px;")
+        generate_label.setStyleSheet("color: #495057; font-weight: 600; font-size: 9pt; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
         data_layout.addWidget(generate_label)
         
         self.generate_button = QPushButton("🎯 Generate Candidates")
@@ -1070,7 +1433,7 @@ Threading Architecture:
         
         # Multi-objective target selection
         multi_targets_label = QLabel("Target Variables:")
-        multi_targets_label.setStyleSheet("font-weight: bold;")
+        multi_targets_label.setStyleSheet("font-weight: 600; font-size: 9pt; color: #495057; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
         multi_obj_layout.addWidget(multi_targets_label)
         
         # Available targets list
@@ -1092,7 +1455,7 @@ Threading Architecture:
         
         # Selected targets with goals
         selected_label = QLabel("Selected Objectives:")
-        selected_label.setStyleSheet("font-weight: bold;")
+        selected_label.setStyleSheet("font-weight: 600; font-size: 9pt; color: #495057; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
         multi_obj_layout.addWidget(selected_label)
         
         self.selected_targets_table = QTableWidget()
@@ -1454,7 +1817,7 @@ Threading Architecture:
         self.session_status_box.setLayout(session_layout)
         
         self.session_status_label = QLabel("No active session")
-        self.session_status_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.session_status_label.setStyleSheet("color: #6c757d; font-size: 9pt; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
         session_layout.addRow("Status:", self.session_status_label)
         
         layout.addWidget(self.session_status_box)
@@ -1524,7 +1887,7 @@ Threading Architecture:
         self.reliability_button.setEnabled(False)
         
         self.reliability_label = QLabel("Not assessed")
-        self.reliability_label.setStyleSheet("font-size: 12px; color: #666;")
+        self.reliability_label.setStyleSheet("font-size: 9pt; color: #6c757d; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
         
         reliability_layout.addWidget(self.reliability_button)
         reliability_layout.addWidget(self.reliability_label)
@@ -1654,7 +2017,7 @@ Threading Architecture:
         
         # Add status info
         self.learning_status_label = QLabel("状态：等待迭代数据")
-        self.learning_status_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.learning_status_label.setStyleSheet("color: #6c757d; font-size: 9pt; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
         learning_controls_layout.addWidget(self.learning_status_label)
         
         learning_controls_layout.addStretch()
@@ -1740,7 +2103,7 @@ Threading Architecture:
         
         # Progress information
         self.progress_info = QLabel("No analysis running. Start an analysis to see the learning process.")
-        self.progress_info.setStyleSheet("font-size: 12px; color: #666; padding: 10px;")
+        self.progress_info.setStyleSheet("font-size: 9pt; color: #6c757d; padding: 10px; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
         process_layout.addWidget(self.progress_info)
         
         # Process visualization plot
@@ -1792,7 +2155,7 @@ Threading Architecture:
                 self.training_label.setText(
                     f"✅ {filename}\n({len(self.training_data)} rows × {len(self.training_data.columns)} cols)"
                 )
-                self.training_label.setStyleSheet("color: #28a745; font-size: 11px;")
+                self.training_label.setStyleSheet("color: #28a745; font-size: 9pt; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
                 
                 # Enable candidate generation button
                 self.generate_button.setEnabled(True)
@@ -1827,7 +2190,7 @@ Threading Architecture:
                 self.virtual_label.setText(
                     f"✅ {filename}\n({len(self.virtual_data)} rows × {len(self.virtual_data.columns)} cols)"
                 )
-                self.virtual_label.setStyleSheet("color: #28a745; font-size: 11px;")
+                self.virtual_label.setStyleSheet("color: #28a745; font-size: 9pt; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
                 
                 # Update column selectors
                 self.update_column_selectors()
@@ -2778,7 +3141,7 @@ Threading Architecture:
                 color = "#dc3545"  # Red
                 assessment = "Needs Improvement"
             
-            self.reliability_label.setStyleSheet(f"font-size: 12px; color: {color}; font-weight: bold;")
+            self.reliability_label.setStyleSheet(f"font-size: 9pt; color: {color}; font-weight: 600; font-family: 'Segoe UI', 'Microsoft YaHei', 'Arial', sans-serif;")
             self.reliability_label.setText(f"Model Reliability: {assessment} (R² = {score:.4f})")
             
         except Exception as e:
@@ -5924,7 +6287,7 @@ class OptimizedCandidateDialog(QDialog):
         self.update_available_features_optimized()
     
     def create_optimized_advanced_tab(self):
-        """延迟创建高级设置标签页"""
+        
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
@@ -6131,7 +6494,7 @@ class OptimizedCandidateDialog(QDialog):
             self.feature_list.item(i).setCheckState(Qt.Unchecked)
     
     def get_selected_features_optimized(self):
-        """获取选中的特征"""
+        
         selected = []
         for i in range(self.feature_list.count()):
             item = self.feature_list.item(i)
@@ -6140,7 +6503,7 @@ class OptimizedCandidateDialog(QDialog):
         return selected
     
     def get_selected_targets_optimized(self):
-        """获取选中的目标"""
+        
         if self.single_target_radio.isChecked():
             return [self.target_combo.currentText()] if self.target_combo.currentText() else []
         else:
@@ -6649,16 +7012,65 @@ class ConstraintConfigDialog(QDialog):
 
 
 def main():
-    """Main function to run the application."""
+    """Main function to run the application with DPI awareness and adaptive UI."""
+    import os
+    
+    # 🔧 设置DPI感知 - 必须在创建QApplication之前设置
+    if hasattr(Qt, 'AA_EnableHighDpiScaling'):
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    
+    # Windows平台的额外DPI设置
+    if os.name == 'nt':  # Windows
+        try:
+            from PyQt5.QtWinExtras import QtWin
+            QtWin.setCurrentProcessExplicitAppUserModelID("ActiveLearningOptimizer.1.0")
+        except ImportError:
+            pass
+        
+        # 设置DPI感知级别
+        try:
+            import ctypes
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+        except:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except:
+                pass
+    
     app = QApplication(sys.argv)
     
     # Set application properties
     app.setApplicationName("Active Learning Optimizer")
     app.setApplicationVersion("1.0")
+    app.setOrganizationName("AIResearch")
+    app.setOrganizationDomain("airesearch.com")
+    
+    # 设置应用程序图标（如果存在的话）
+    # app.setWindowIcon(QIcon('icon.png'))
+    
+    # 设置全局字体策略以支持不同DPI
+    font = app.font()
+    if hasattr(QApplication, 'primaryScreen'):
+        screen = app.primaryScreen()
+        if screen and hasattr(screen, 'logicalDotsPerInch'):
+            dpi = screen.logicalDotsPerInch()
+            if dpi > 120:  # 高DPI屏幕
+                font_size = max(8, int(9 * (dpi / 96.0)))
+                font.setPointSize(min(font_size, 12))  # 限制最大字体大小
+                app.setFont(font)
+    
+    print(f"🚀 Start the Active Learning Optimizer")
+    print(f"📱 应用DPI设置: {app.devicePixelRatio() if hasattr(app, 'devicePixelRatio') else '未知'}")
     
     # Create and show window
     window = ActiveLearningWindow()
     window.show()
+    
+    # 确保窗口在屏幕中心显示
+    window.activateWindow()
+    window.raise_()
     
     sys.exit(app.exec_())
 
