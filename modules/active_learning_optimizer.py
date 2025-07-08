@@ -138,7 +138,7 @@ class ActiveLearningOptimizer:
         self.is_fitted = False
         self._progress_callback = None  # For iterative generation progress
         self._batch_size = None  # Custom batch size for iterative generation
-        
+    
         # Iterative optimization state
         self._performance_history = []
         self._current_training_data = None
@@ -411,8 +411,8 @@ class ActiveLearningOptimizer:
         return scalarized
 
     def _run_single_iteration(self, training_df, virtual_df, target_column, feature_columns, 
-                             goal='maximize', model_config=None, acquisition_config=None, 
-                             n_iterations_bootstrap=100):
+            goal='maximize', model_config=None, acquisition_config=None, 
+            n_iterations_bootstrap=100):
         """
         Execute the complete active learning optimization workflow for single objective.
         
@@ -643,8 +643,8 @@ class ActiveLearningOptimizer:
         return results_df
 
     def _run_multi_objective_single_iteration(self, training_df, virtual_df, target_columns, feature_columns, 
-                                             goal_directions, model_config=None, acquisition_config=None, 
-                                             n_iterations_bootstrap=30, n_scalarizations=8):
+                          goal_directions, model_config=None, acquisition_config=None, 
+                          n_iterations_bootstrap=30, n_scalarizations=8):
         """
         Execute multi-objective optimization with Pareto analysis.
         
@@ -935,36 +935,7 @@ class ActiveLearningOptimizer:
     def run(self, training_df, virtual_df, target_column, feature_columns, 
             goal='maximize', model_config=None, acquisition_config=None, 
             n_iterations_bootstrap=100):
-        """
-        Execute single-objective active learning analysis (backward compatibility).
-        
-        This method maintains backward compatibility with existing code while internally
-        using the refactored single iteration method.
-        
-        Parameters:
-        -----------
-        training_df : pandas.DataFrame
-            Existing experimental data
-        virtual_df : pandas.DataFrame
-            Candidate data points to evaluate
-        target_column : str
-            Name of the target column to optimize
-        feature_columns : list
-            List of feature column names
-        goal : str, default='maximize'
-            Optimization goal: 'maximize' or 'minimize'
-        model_config : dict, optional
-            Model configuration parameters
-        acquisition_config : dict, optional
-            Acquisition function configuration
-        n_iterations_bootstrap : int, default=100
-            Number of bootstrap iterations
-            
-        Returns:
-        --------
-        results_df : pandas.DataFrame
-            Virtual data augmented with predictions and acquisition scores
-        """
+     
         return self._run_single_iteration(
             training_df, virtual_df, target_column, feature_columns,
             goal, model_config, acquisition_config, n_iterations_bootstrap
@@ -973,38 +944,7 @@ class ActiveLearningOptimizer:
     def run_multi_objective(self, training_df, virtual_df, target_columns, feature_columns, 
                           goal_directions, model_config=None, acquisition_config=None, 
                           n_iterations_bootstrap=30, n_scalarizations=8):
-        """
-        Execute multi-objective optimization analysis (backward compatibility).
-        
-        This method maintains backward compatibility with existing code while internally
-        using the refactored single iteration method.
-        
-        Parameters:
-        -----------
-        training_df : pandas.DataFrame
-            Existing experimental data
-        virtual_df : pandas.DataFrame
-            Candidate data points to evaluate
-        target_columns : list
-            List of target column names to optimize
-        feature_columns : list
-            List of feature column names
-        goal_directions : list
-            List of 'maximize' or 'minimize' for each target
-        model_config : dict, optional
-            Model configuration parameters
-        acquisition_config : dict, optional
-            Acquisition function configuration
-        n_iterations_bootstrap : int, default=30
-            Number of bootstrap iterations
-        n_scalarizations : int, default=8
-            Number of scalarization weights to try
-            
-        Returns:
-        --------
-        results_df : pandas.DataFrame
-            Virtual data with multi-objective predictions and Pareto analysis
-        """
+      
         return self._run_multi_objective_single_iteration(
             training_df, virtual_df, target_columns, feature_columns,
             goal_directions, model_config, acquisition_config, 
@@ -1017,59 +957,7 @@ class ActiveLearningOptimizer:
                                    n_iterations_bootstrap=50, n_scalarizations=6,
                                    enable_adaptive_sampling=True, enable_intelligent_stopping=True,
                                    enable_batch_optimization=True, stopping_config=None):
-        """
-        Start fully automated iterative active learning optimization with integrated advanced features.
         
-        This method implements a complete active learning loop that:
-        1. Adaptively adjusts sampling strategy based on performance history
-        2. Uses optimized batch sampling for diversity and uncertainty balance
-        3. Implements intelligent stopping criteria to prevent overfitting
-        4. Yields results after each iteration for real-time monitoring
-        
-        Parameters:
-        -----------
-        training_df : pandas.DataFrame
-            Initial experimental data
-        virtual_df : pandas.DataFrame
-            Candidate data points to evaluate
-        target_columns : str or list
-            Target column name(s) to optimize
-        feature_columns : list
-            List of feature column names
-        goal_directions : str or list, optional
-            'maximize'/'minimize' for each target. If None, defaults to 'maximize'
-        max_iterations : int, default=10
-            Maximum number of iterations
-        batch_size : int, default=5
-            Number of samples to recommend per iteration
-        model_config : dict, optional
-            Model configuration parameters
-        acquisition_config : dict, optional
-            Acquisition function configuration
-        n_iterations_bootstrap : int, default=50
-            Number of bootstrap iterations (reduced for iterative mode)
-        n_scalarizations : int, default=6
-            Number of scalarization weights for multi-objective
-        enable_adaptive_sampling : bool, default=True
-            Enable adaptive sampling strategy
-        enable_intelligent_stopping : bool, default=True
-            Enable intelligent stopping criteria
-        enable_batch_optimization : bool, default=True
-            Enable optimized batch sampling
-        stopping_config : dict, optional
-            Configuration for stopping criteria
-            
-        Yields:
-        -------
-        iteration_result : dict
-            Dictionary containing:
-            - 'iteration': Current iteration number
-            - 'recommendations': DataFrame with recommended samples
-            - 'performance_metrics': Current model performance
-            - 'should_stop': Boolean indicating if stopping criteria met
-            - 'stop_reason': Reason for stopping (if applicable)
-            - 'acquisition_config': Current acquisition configuration
-        """
         # Normalize inputs
         if isinstance(target_columns, str):
             target_columns = [target_columns]

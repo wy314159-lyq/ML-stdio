@@ -1487,46 +1487,14 @@ Threading Architecture:
         feature_buttons_layout.addWidget(self.select_all_button)
         feature_buttons_layout.addWidget(self.select_none_button)
         
-        # Add feature sorting controls (enhanced slider design)
-        sort_widget = QGroupBox("特征排序")
-        sort_widget.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #cccccc;
-                border-radius: 5px;
-                margin: 3px 0px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
-        """)
-        sort_layout = QVBoxLayout(sort_widget)
-        sort_layout.setContentsMargins(5, 5, 5, 5)
+        # 添加特征排序控件 (使用下拉菜单替代滑块，避免重叠问题)
+        sort_layout = QHBoxLayout()
+        sort_layout.setContentsMargins(0, 0, 0, 0)
         sort_layout.setSpacing(5)
         
-        # Current sorting status display  
-        self.sort_status_label = QLabel("当前: 元素优先")
-        self.sort_status_label.setStyleSheet("""
-            QLabel {
-                color: #2E86AB; 
-                font-size: 10pt; 
-                font-weight: bold;
-                background-color: #f0f8ff;
-                border: 1px solid #2E86AB;
-                border-radius: 3px;
-                padding: 2px 6px;
-            }
-        """)
-        self.sort_status_label.setAlignment(Qt.AlignCenter)
-        sort_layout.addWidget(self.sort_status_label)
-        
-        # Slider for sorting method selection
-        slider_layout = QVBoxLayout()
-        slider_layout.setContentsMargins(0, 0, 0, 0)
-        slider_layout.setSpacing(2)
+        sort_label = QLabel("特征排序:")
+        sort_label.setStyleSheet("font-weight: bold;")
+        sort_layout.addWidget(sort_label)
         
         self.sort_methods = [
             "元素优先",
@@ -1536,89 +1504,39 @@ Threading Architecture:
             "原始顺序"
         ]
         
-        self.feature_sort_slider = QSlider(Qt.Horizontal)
-        self.feature_sort_slider.setRange(0, len(self.sort_methods) - 1)
-        self.feature_sort_slider.setValue(0)  # Default to "元素优先"
-        self.feature_sort_slider.setTickPosition(QSlider.TicksBelow)
-        self.feature_sort_slider.setTickInterval(1)
-        self.feature_sort_slider.valueChanged.connect(self.on_feature_sort_slider_changed)
-        self.feature_sort_slider.setMinimumWidth(150)
-        self.feature_sort_slider.setMinimumHeight(30)
-        self.feature_sort_slider.setMaximumHeight(30)
-        
-        # Enhanced styling for better visibility
-        self.feature_sort_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                border: 2px solid #bbb;
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #f0f0f0, stop: 1 #e0e0e0);
-                height: 8px;
-                border-radius: 4px;
+        self.feature_sort_combo = QComboBox()
+        self.feature_sort_combo.addItems(self.sort_methods)
+        self.feature_sort_combo.setCurrentText("元素优先")
+        self.feature_sort_combo.currentIndexChanged.connect(self.on_feature_sort_changed)
+        self.feature_sort_combo.setToolTip("""
+            元素优先: 按元素、材料属性、工艺参数排序
+            工艺优先: 按工艺参数、元素、材料属性排序
+            A-Z: 字母升序排列
+            Z-A: 字母降序排列
+            原始顺序: 保持数据源顺序
+        """)
+        self.feature_sort_combo.setStyleSheet("""
+            QComboBox {
+                border: 1px solid #2E86AB;
+                border-radius: 3px;
+                padding: 2px 8px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #f8f8f8, stop:1 #e8e8e8);
+                min-width: 100px;
             }
-            QSlider::sub-page:horizontal {
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #2E86AB, stop: 1 #1a5490);
-                border: 2px solid #1a5490;
-                height: 8px;
-                border-radius: 4px;
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 15px;
+                border-left: 1px solid #2E86AB;
             }
-            QSlider::add-page:horizontal {
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #f0f0f0, stop: 1 #d0d0d0);
-                border: 2px solid #bbb;
-                height: 8px;
-                border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #ffffff, stop:1 #d0d0d0);
-                border: 2px solid #2E86AB;
-                width: 18px;
-                height: 18px;
-                margin-top: -7px;
-                margin-bottom: -7px;
-                border-radius: 9px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #ffffff, stop:1 #e0e0e0);
-                border: 2px solid #1a5490;
-                box-shadow: 0px 2px 4px rgba(0,0,0,0.3);
-            }
-            QSlider::handle:horizontal:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #e0e0e0, stop:1 #c0c0c0);
-                border: 2px solid #1a5490;
+            QComboBox QAbstractItemView {
+                border: 1px solid #2E86AB;
+                selection-background-color: #2E86AB;
             }
         """)
-        
-        # Add the slider to layout
-        slider_layout.addWidget(self.feature_sort_slider)
-        
-        # Enhanced tick labels with better spacing
-        tick_labels_widget = QWidget()
-        tick_labels_layout = QHBoxLayout(tick_labels_widget)
-        tick_labels_layout.setContentsMargins(9, 0, 9, 0)  # Align with slider handle positions
-        tick_labels_layout.setSpacing(0)
-        
-        # Show all method labels
-        for i, method in enumerate(self.sort_methods):
-            if i > 0:
-                tick_labels_layout.addStretch()
-            label = QLabel(method)
-            label.setStyleSheet("""
-                QLabel {
-                    font-size: 8pt; 
-                    color: #666; 
-                    font-weight: bold;
-                    padding: 1px;
-                }
-            """)
-            label.setAlignment(Qt.AlignCenter)
-            tick_labels_layout.addWidget(label)
-        
-        slider_layout.addWidget(tick_labels_widget)
-        sort_layout.addLayout(slider_layout)
+        sort_layout.addWidget(self.feature_sort_combo)
+        sort_layout.addStretch()
         
         self.feature_list = QListWidget()
         self.feature_list.setSelectionMode(QAbstractItemView.MultiSelection)
@@ -1626,7 +1544,7 @@ Threading Architecture:
         self.feature_list.setMaximumHeight(200)  # Added maximum height to prevent too much expansion
         
         feature_layout.addWidget(feature_buttons)
-        feature_layout.addWidget(sort_widget)
+        feature_layout.addLayout(sort_layout)
         feature_layout.addWidget(self.feature_list)
         
         config_layout.addRow("Feature Variables:", feature_widget)
@@ -2475,12 +2393,11 @@ Threading Architecture:
     
     def _sort_features(self, feature_columns):
         """Sort features according to the selected sorting method."""
-        if not hasattr(self, 'feature_sort_slider'):
-            # If sorting slider doesn't exist yet, return as-is
+        if not hasattr(self, 'feature_sort_combo'):
+            # If sorting combo doesn't exist yet, return as-is
             return feature_columns
             
-        sort_index = self.feature_sort_slider.value()
-        sort_method = self.sort_methods[sort_index]
+        sort_method = self.feature_sort_combo.currentText()
         
         if sort_method == "A-Z":
             return sorted(feature_columns)
@@ -2555,13 +2472,11 @@ Threading Architecture:
         # 分别排序后合并
         return sorted(processes) + sorted(elements) + sorted(materials) + sorted(others)
     
-    def on_feature_sort_slider_changed(self):
-        """Handle feature sorting slider change."""
-        # Update status label
-        if hasattr(self, 'feature_sort_slider') and hasattr(self, 'sort_status_label'):
-            current_method = self.sort_methods[self.feature_sort_slider.value()]
-            self.sort_status_label.setText(f"当前: {current_method}")
-            print(f"🎛️ 特征排序已切换到: {current_method}")
+    def on_feature_sort_changed(self):
+        """Handle feature sorting change."""
+        if hasattr(self, 'feature_sort_combo'):
+            current_method = self.feature_sort_combo.currentText()
+            print(f"🔄 特征排序已切换到: {current_method}")
             
             # Apply new sorting if data is loaded
             if hasattr(self, 'training_data') and self.training_data is not None:
@@ -2578,11 +2493,6 @@ Threading Architecture:
                         item.setCheckState(Qt.Checked)
                     else:
                         item.setCheckState(Qt.Unchecked)
-    
-    def on_feature_sort_changed(self):
-        """Handle feature sorting change (compatibility method)."""
-        # This method is kept for backward compatibility
-        self.on_feature_sort_slider_changed()
     
     def on_acquisition_changed(self):
         """Handle acquisition function change."""
@@ -3930,10 +3840,10 @@ Threading Architecture:
                 
                 # 显示自动应用的设置信息
                 if generation_settings:
-                    info_message += "🎯 The following settings have been automatically applied to the main interface：\n"
-                    info_message += f"• 目标变量: {', '.join(generation_settings['targets'])}\n"
-                    info_message += f"• 特征数量: {len(generation_settings['features'])} 个\n"
-                    info_message += f"• 优化模式: {'Single-objective' if generation_settings['target_mode'] == 'single' else 'Multi-objective'}\n\n"
+                    info_message += "🎯 The following settings have been automatically applied to the main interface:\n"
+                    info_message += f"• Target variables: {', '.join(generation_settings['targets'])}\n"
+                    info_message += f"• Number of features: {len(generation_settings['features'])} features\n"
+                    info_message += f"• Optimization mode: {'Single-objective' if generation_settings['target_mode'] == 'single' else 'Multi-objective'}\n\n"
                 
                 # 如果数据量少于1000，可能是约束过滤的结果
                 if len(candidate_df) < 1000:
@@ -4228,42 +4138,68 @@ Threading Architecture:
         instructions.setWordWrap(True)
         self.feedback_layout.addRow(instructions)
 
-        # Create batch feedback table
+        # 创建一个滚动区域来容纳表格，避免表格过大导致界面重叠
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setMinimumHeight(250)
+        scroll_area.setMaximumHeight(350)  # 限制最大高度，避免挤压其他控件
+        
+        # 创建表格容器
+        table_container = QWidget()
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 创建批量反馈表格
         self.batch_feedback_table = QTableWidget()
-        self.batch_feedback_table.setMinimumHeight(300)
         self.batch_feedback_table.setAlternatingRowColors(True)
+        self.batch_feedback_table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)  # 平滑滚动
+        self.batch_feedback_table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         
         feature_columns = self.get_selected_features()
-        # Show more features but limit to reasonable number for display
-        display_features = feature_columns[:6] if len(feature_columns) > 6 else feature_columns
-        all_columns = ['Rec#'] + display_features + [f"Measured_{target}" for target in targets] + ['Status']
+        # 限制显示的特征数量，优先显示重要特征
+        display_features = feature_columns[:4] if len(feature_columns) > 4 else feature_columns
+        
+        # 使用更简洁的列标题
+        all_columns = ['#'] + display_features + [f"测量值_{target}" for target in targets] + ['状态']
         
         self.batch_feedback_table.setColumnCount(len(all_columns))
         self.batch_feedback_table.setRowCount(len(top_recommendations))
         self.batch_feedback_table.setHorizontalHeaderLabels(all_columns)
         
-        # Store the batch data for later processing
+        # 存储批处理数据
         self.batch_recommendations = top_recommendations.copy()
         self.batch_target_inputs = {}
         
-        # Populate table
+        # 填充表格
         for row_idx, (_, rec) in enumerate(top_recommendations.iterrows()):
-            # Recommendation number
-            rec_item = QTableWidgetItem(f"#{row_idx + 1}")
+            # 推荐编号
+            rec_item = QTableWidgetItem(f"{row_idx + 1}")
             rec_item.setFlags(rec_item.flags() & ~Qt.ItemIsEditable)
             rec_item.setTextAlignment(Qt.AlignCenter)
             self.batch_feedback_table.setItem(row_idx, 0, rec_item)
             
-            # Feature values (display features)
+            # 特征值（显示特征）
             for col_idx, feature in enumerate(display_features):
                 if feature in rec.index:
-                    feature_item = QTableWidgetItem(f"{rec[feature]:.4f}")
+                    # 使用更紧凑的格式显示数值
+                    value = rec[feature]
+                    if abs(value) < 0.001 or abs(value) >= 10000:
+                        formatted_value = f"{value:.2e}"  # 科学计数法
+                    elif abs(value) < 0.01:
+                        formatted_value = f"{value:.4f}"  # 小数点后4位
+                    elif abs(value) < 1:
+                        formatted_value = f"{value:.3f}"  # 小数点后3位
+                    else:
+                        formatted_value = f"{value:.2f}"  # 小数点后2位
+                    
+                    feature_item = QTableWidgetItem(formatted_value)
                     feature_item.setFlags(feature_item.flags() & ~Qt.ItemIsEditable)
                     feature_item.setTextAlignment(Qt.AlignCenter)
                     feature_item.setBackground(QColor(240, 248, 255))
                     
-                    # Add tooltip with all features for this recommendation
-                    all_features_info = f"Recommendation #{row_idx + 1} - All Features:\n"
+                    # 添加包含所有特征的工具提示
+                    all_features_info = f"推荐 #{row_idx + 1} - 所有特征:\n"
                     for feat in feature_columns:
                         if feat in rec.index:
                             all_features_info += f"{feat}: {rec[feat]:.4f}\n"
@@ -4271,34 +4207,53 @@ Threading Architecture:
                     
                     self.batch_feedback_table.setItem(row_idx, col_idx + 1, feature_item)
             
-            # Target input fields
+            # 目标输入字段
             self.batch_target_inputs[row_idx] = {}
             for target_idx, target in enumerate(targets):
-                input_item = QTableWidgetItem("")
-                input_item.setTextAlignment(Qt.AlignCenter)
-                input_item.setBackground(QColor(255, 248, 240))
-                input_item.setToolTip(f"Enter measured value for {target}")
+                # 使用LineEdit替代TableWidgetItem，提供更好的输入体验
+                input_widget = QLineEdit()
+                input_widget.setAlignment(Qt.AlignCenter)
+                input_widget.setStyleSheet("""
+                    QLineEdit {
+                        background-color: #fff8f0;
+                        border: 1px solid #ddd;
+                        border-radius: 2px;
+                        padding: 2px;
+                    }
+                    QLineEdit:focus {
+                        border: 1px solid #2E86AB;
+                        background-color: #fffaf5;
+                    }
+                """)
+                input_widget.setToolTip(f"Enter measured value for {target}")
+                input_widget.setPlaceholderText("Enter value")
+                
+                # 使用QDoubleValidator确保只能输入数值
+                validator = QDoubleValidator()
+                validator.setNotation(QDoubleValidator.StandardNotation)
+                input_widget.setValidator(validator)
+                
                 col_pos = len(display_features) + 1 + target_idx
-                self.batch_feedback_table.setItem(row_idx, col_pos, input_item)
-                self.batch_target_inputs[row_idx][target] = input_item
+                self.batch_feedback_table.setCellWidget(row_idx, col_pos, input_widget)
+                self.batch_target_inputs[row_idx][target] = input_widget
             
-            # Status column
+            # 状态列
             status_item = QTableWidgetItem("Pending")
             status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
             status_item.setTextAlignment(Qt.AlignCenter)
             status_item.setBackground(QColor(255, 255, 224))
             self.batch_feedback_table.setItem(row_idx, len(all_columns) - 1, status_item)
 
-        # Style the table
+        # 设置表格样式
         self.batch_feedback_table.setStyleSheet("""
             QTableWidget {
                 gridline-color: #ddd;
                 border: 1px solid #ccc;
                 background-color: white;
-                font-size: 11px;
+                font-size: 10px;  /* 更小的字体 */
             }
             QTableWidget::item {
-                padding: 8px;
+                padding: 4px;  /* 更小的内边距 */
                 border: 1px solid #ddd;
             }
             QTableWidget::item:selected {
@@ -4306,14 +4261,26 @@ Threading Architecture:
             }
             QHeaderView::section {
                 background-color: #f5f5f5;
-                padding: 8px;
+                padding: 4px;  /* 更小的内边距 */
                 border: 1px solid #ddd;
                 font-weight: bold;
+                font-size: 10px;  /* 更小的字体 */
             }
         """)
         
-        self.batch_feedback_table.resizeColumnsToContents()
-        self.feedback_layout.addRow(self.batch_feedback_table)
+        # 设置列宽
+        self.batch_feedback_table.setColumnWidth(0, 30)  # 编号列宽度
+        for col in range(1, self.batch_feedback_table.columnCount()):
+            self.batch_feedback_table.setColumnWidth(col, 80)  # 其他列宽度
+        
+        # 将表格添加到容器
+        table_layout.addWidget(self.batch_feedback_table)
+        
+        # 设置滚动区域的内容
+        scroll_area.setWidget(table_container)
+        
+        # 添加到布局
+        self.feedback_layout.addRow(scroll_area)
 
         # Control buttons
         button_layout = QHBoxLayout()
@@ -4406,7 +4373,7 @@ Threading Architecture:
             self.setup_batch_feedback_ui()
 
     def validate_batch_inputs(self):
-        """Validate all batch input values and update status."""
+        """验证所有批量输入值并更新状态。"""
         if not hasattr(self, 'batch_target_inputs'):
             return
             
@@ -4417,40 +4384,61 @@ Threading Architecture:
             all_valid = True
             values = {}
             
-            for target, input_item in target_inputs.items():
-                value_str = input_item.text().strip()
+            for target, input_widget in target_inputs.items():
+                value_str = input_widget.text().strip()
                 
                 if not value_str:
                     all_valid = False
-                    input_item.setBackground(QColor(255, 240, 240))  # Light red
-                    input_item.setToolTip(f"Missing value for {target}")
+                    input_widget.setStyleSheet("""
+                        QLineEdit {
+                            background-color: #fff0f0;
+                            border: 1px solid #ffb6b6;
+                            border-radius: 2px;
+                            padding: 2px;
+                        }
+                    """)  # 浅红色背景
+                    input_widget.setToolTip(f"缺少{target}的值")
                     continue
                     
                 try:
                     value = float(value_str)
                     values[target] = value
-                    input_item.setBackground(QColor(240, 255, 240))  # Light green
-                    input_item.setToolTip(f"Valid value: {value}")
+                    input_widget.setStyleSheet("""
+                        QLineEdit {
+                            background-color: #f0fff0;
+                            border: 1px solid #90EE90;
+                            border-radius: 2px;
+                            padding: 2px;
+                        }
+                    """)  # 浅绿色背景
+                    input_widget.setToolTip(f"有效值: {value}")
                 except ValueError:
                     all_valid = False
-                    input_item.setBackground(QColor(255, 240, 240))  # Light red
-                    input_item.setToolTip(f"Invalid number: '{value_str}'")
+                    input_widget.setStyleSheet("""
+                        QLineEdit {
+                            background-color: #fff0f0;
+                            border: 1px solid #ffb6b6;
+                            border-radius: 2px;
+                            padding: 2px;
+                        }
+                    """)  # 浅红色背景
+                    input_widget.setToolTip(f"Invalid number: '{value_str}'")
             
-            # Update status column
+            # 更新状态列
             status_col = self.batch_feedback_table.columnCount() - 1
             status_item = self.batch_feedback_table.item(row_idx, status_col)
             
             if all_valid:
-                status_item.setText("✅ Valid")
+                status_item.setText("✓ Valid")
                 status_item.setBackground(QColor(240, 255, 240))
                 valid_count += 1
             else:
-                status_item.setText("❌ Invalid")
+                status_item.setText("✗ Invalid")
                 status_item.setBackground(QColor(255, 240, 240))
         
-        # Show validation summary
+        # 显示验证摘要
         if valid_count == total_count:
-            QMessageBox.information(self, "Validation Complete", 
+            QMessageBox.information(self, "Verification Complete", 
                                    f"✅ All {total_count} entries are valid and ready for submission!")
         else:
             QMessageBox.warning(self, "Validation Issues", 
@@ -4458,7 +4446,7 @@ Threading Architecture:
                                f"Please fix the highlighted issues.")
 
     def clear_batch_inputs(self):
-        """Clear all batch input values."""
+        """清除所有批量输入值。"""
         if not hasattr(self, 'batch_target_inputs'):
             return
             
@@ -4469,40 +4457,47 @@ Threading Architecture:
         
         if reply == QMessageBox.Yes:
             for row_idx, target_inputs in self.batch_target_inputs.items():
-                for target, input_item in target_inputs.items():
-                    input_item.setText("")
-                    input_item.setBackground(QColor(255, 248, 240))  # Original color
-                    input_item.setToolTip(f"Enter measured value for {target}")
+                for target, input_widget in target_inputs.items():
+                    input_widget.setText("")
+                    input_widget.setStyleSheet("""
+                        QLineEdit {
+                            background-color: #fff8f0;
+                            border: 1px solid #ddd;
+                            border-radius: 2px;
+                            padding: 2px;
+                        }
+                    """)  # 恢复原始样式
+                    input_widget.setToolTip(f"Enter measured value for {target}")
                 
-                # Reset status
+                # 重置状态
                 status_col = self.batch_feedback_table.columnCount() - 1
                 status_item = self.batch_feedback_table.item(row_idx, status_col)
                 status_item.setText("Pending")
                 status_item.setBackground(QColor(255, 255, 224))
 
     def submit_batch_results(self):
-        """Submit all batch experimental results and start next iteration."""
+        """提交所有批量实验结果并开始下一轮迭代。"""
         if not hasattr(self, 'batch_target_inputs') or not hasattr(self, 'batch_recommendations'):
             QMessageBox.warning(self, "Warning", "No batch data available to submit.")
             return
 
-        # Collect and validate all results
+        # 收集并验证所有结果
         batch_results = []
         feature_columns = self.get_selected_features()
         
         for row_idx, target_inputs in self.batch_target_inputs.items():
             row_data = {}
             
-            # Get feature values from recommendations
+            # 从推荐中获取特征值
             rec = self.batch_recommendations.iloc[row_idx]
             for feature in feature_columns:
                 if feature in rec.index:
                     row_data[feature] = rec[feature]
             
-            # Get target values from user input
+            # 从用户输入获取目标值
             target_values = {}
-            for target, input_item in target_inputs.items():
-                value_str = input_item.text().strip()
+            for target, input_widget in target_inputs.items():
+                value_str = input_widget.text().strip()
                 
                 if not value_str:
                     QMessageBox.critical(self, "Input Error", 
@@ -4519,7 +4514,7 @@ Threading Architecture:
             row_data['targets'] = target_values
             batch_results.append(row_data)
 
-        # Confirm submission
+        # 确认提交
         reply = QMessageBox.question(self, "Submit Batch Results", 
                                    f"Submit {len(batch_results)} experimental results and start next iteration?",
                                    QMessageBox.Yes | QMessageBox.No,
@@ -7839,7 +7834,7 @@ def main():
                 app.setFont(font)
     
     print(f"🚀 Start the Active Learning Optimizer")
-    print(f"📱 应用DPI设置: {app.devicePixelRatio() if hasattr(app, 'devicePixelRatio') else '未知'}")
+    print(f"📱 Application DPI setting: {app.devicePixelRatio() if hasattr(app, 'devicePixelRatio') else 'Unknown'}")
     
     # Create and show window
     window = ActiveLearningWindow()
