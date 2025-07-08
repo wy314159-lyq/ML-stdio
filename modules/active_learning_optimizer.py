@@ -138,6 +138,13 @@ class ActiveLearningOptimizer:
         self.is_fitted = False
         self._progress_callback = None  # For iterative generation progress
         self._batch_size = None  # Custom batch size for iterative generation
+        
+        # Iterative optimization state
+        self._performance_history = []
+        self._current_training_data = None
+        self._current_virtual_data = None
+        self._iteration_count = 0
+        self._is_iterative_mode = False
     
     def set_progress_callback(self, callback):
         """设置迭代生成的进度回调函数"""
@@ -403,9 +410,9 @@ class ActiveLearningOptimizer:
             
         return scalarized
 
-    def run(self, training_df, virtual_df, target_column, feature_columns, 
-            goal='maximize', model_config=None, acquisition_config=None, 
-            n_iterations_bootstrap=100):
+    def _run_single_iteration(self, training_df, virtual_df, target_column, feature_columns, 
+                             goal='maximize', model_config=None, acquisition_config=None, 
+                             n_iterations_bootstrap=100):
         """
         Execute the complete active learning optimization workflow for single objective.
         
@@ -635,9 +642,9 @@ class ActiveLearningOptimizer:
         
         return results_df
 
-    def run_multi_objective(self, training_df, virtual_df, target_columns, feature_columns, 
-                          goal_directions, model_config=None, acquisition_config=None, 
-                          n_iterations_bootstrap=30, n_scalarizations=8):
+    def _run_multi_objective_single_iteration(self, training_df, virtual_df, target_columns, feature_columns, 
+                                             goal_directions, model_config=None, acquisition_config=None, 
+                                             n_iterations_bootstrap=30, n_scalarizations=8):
         """
         Execute multi-objective optimization with Pareto analysis.
         
@@ -924,6 +931,390 @@ class ActiveLearningOptimizer:
         print(f"Multi-objective optimization completed: {len(results_df)} results")
         
         return results_df
+    
+    def run(self, training_df, virtual_df, target_column, feature_columns, 
+            goal='maximize', model_config=None, acquisition_config=None, 
+            n_iterations_bootstrap=100):
+        """
+        Execute single-objective active learning analysis (backward compatibility).
+        
+        This method maintains backward compatibility with existing code while internally
+        using the refactored single iteration method.
+        
+        Parameters:
+        -----------
+        training_df : pandas.DataFrame
+            Existing experimental data
+        virtual_df : pandas.DataFrame
+            Candidate data points to evaluate
+        target_column : str
+            Name of the target column to optimize
+        feature_columns : list
+            List of feature column names
+        goal : str, default='maximize'
+            Optimization goal: 'maximize' or 'minimize'
+        model_config : dict, optional
+            Model configuration parameters
+        acquisition_config : dict, optional
+            Acquisition function configuration
+        n_iterations_bootstrap : int, default=100
+            Number of bootstrap iterations
+            
+        Returns:
+        --------
+        results_df : pandas.DataFrame
+            Virtual data augmented with predictions and acquisition scores
+        """
+        return self._run_single_iteration(
+            training_df, virtual_df, target_column, feature_columns,
+            goal, model_config, acquisition_config, n_iterations_bootstrap
+        )
+    
+    def run_multi_objective(self, training_df, virtual_df, target_columns, feature_columns, 
+                          goal_directions, model_config=None, acquisition_config=None, 
+                          n_iterations_bootstrap=30, n_scalarizations=8):
+        """
+        Execute multi-objective optimization analysis (backward compatibility).
+        
+        This method maintains backward compatibility with existing code while internally
+        using the refactored single iteration method.
+        
+        Parameters:
+        -----------
+        training_df : pandas.DataFrame
+            Existing experimental data
+        virtual_df : pandas.DataFrame
+            Candidate data points to evaluate
+        target_columns : list
+            List of target column names to optimize
+        feature_columns : list
+            List of feature column names
+        goal_directions : list
+            List of 'maximize' or 'minimize' for each target
+        model_config : dict, optional
+            Model configuration parameters
+        acquisition_config : dict, optional
+            Acquisition function configuration
+        n_iterations_bootstrap : int, default=30
+            Number of bootstrap iterations
+        n_scalarizations : int, default=8
+            Number of scalarization weights to try
+            
+        Returns:
+        --------
+        results_df : pandas.DataFrame
+            Virtual data with multi-objective predictions and Pareto analysis
+        """
+        return self._run_multi_objective_single_iteration(
+            training_df, virtual_df, target_columns, feature_columns,
+            goal_directions, model_config, acquisition_config, 
+            n_iterations_bootstrap, n_scalarizations
+        )
+    
+    def start_iterative_optimization(self, training_df, virtual_df, target_columns, feature_columns,
+                                   goal_directions=None, max_iterations=10, batch_size=5,
+                                   model_config=None, acquisition_config=None,
+                                   n_iterations_bootstrap=50, n_scalarizations=6,
+                                   enable_adaptive_sampling=True, enable_intelligent_stopping=True,
+                                   enable_batch_optimization=True, stopping_config=None):
+        """
+        Start fully automated iterative active learning optimization with integrated advanced features.
+        
+        This method implements a complete active learning loop that:
+        1. Adaptively adjusts sampling strategy based on performance history
+        2. Uses optimized batch sampling for diversity and uncertainty balance
+        3. Implements intelligent stopping criteria to prevent overfitting
+        4. Yields results after each iteration for real-time monitoring
+        
+        Parameters:
+        -----------
+        training_df : pandas.DataFrame
+            Initial experimental data
+        virtual_df : pandas.DataFrame
+            Candidate data points to evaluate
+        target_columns : str or list
+            Target column name(s) to optimize
+        feature_columns : list
+            List of feature column names
+        goal_directions : str or list, optional
+            'maximize'/'minimize' for each target. If None, defaults to 'maximize'
+        max_iterations : int, default=10
+            Maximum number of iterations
+        batch_size : int, default=5
+            Number of samples to recommend per iteration
+        model_config : dict, optional
+            Model configuration parameters
+        acquisition_config : dict, optional
+            Acquisition function configuration
+        n_iterations_bootstrap : int, default=50
+            Number of bootstrap iterations (reduced for iterative mode)
+        n_scalarizations : int, default=6
+            Number of scalarization weights for multi-objective
+        enable_adaptive_sampling : bool, default=True
+            Enable adaptive sampling strategy
+        enable_intelligent_stopping : bool, default=True
+            Enable intelligent stopping criteria
+        enable_batch_optimization : bool, default=True
+            Enable optimized batch sampling
+        stopping_config : dict, optional
+            Configuration for stopping criteria
+            
+        Yields:
+        -------
+        iteration_result : dict
+            Dictionary containing:
+            - 'iteration': Current iteration number
+            - 'recommendations': DataFrame with recommended samples
+            - 'performance_metrics': Current model performance
+            - 'should_stop': Boolean indicating if stopping criteria met
+            - 'stop_reason': Reason for stopping (if applicable)
+            - 'acquisition_config': Current acquisition configuration
+        """
+        # Normalize inputs
+        if isinstance(target_columns, str):
+            target_columns = [target_columns]
+            
+        if goal_directions is None:
+            goal_directions = ['maximize'] * len(target_columns)
+        elif isinstance(goal_directions, str):
+            goal_directions = [goal_directions] * len(target_columns)
+            
+        if len(goal_directions) != len(target_columns):
+            raise ValueError("Number of goal_directions must match number of target_columns")
+            
+        # Initialize stopping configuration
+        if stopping_config is None:
+            stopping_config = {
+                'min_iterations': 3,
+                'patience': 3,
+                'min_improvement': 0.001,
+                'convergence_window': 3
+            }
+        
+        # Initialize iterative state
+        self._is_iterative_mode = True
+        self._iteration_count = 0
+        self._performance_history = []
+        self._current_training_data = training_df.copy()
+        self._current_virtual_data = virtual_df.copy()
+        
+        # Initialize acquisition config
+        if acquisition_config is None:
+            acquisition_config = {}
+            
+        current_acquisition_config = acquisition_config.copy()
+        
+        print(f"Starting iterative optimization for {len(target_columns)} target(s)")
+        print(f"Targets: {target_columns}")
+        print(f"Goals: {goal_directions}")
+        print(f"Max iterations: {max_iterations}, Batch size: {batch_size}")
+        print(f"Advanced features: Adaptive={enable_adaptive_sampling}, "
+              f"Stopping={enable_intelligent_stopping}, BatchOpt={enable_batch_optimization}")
+        
+        # Main optimization loop
+        for iteration in range(max_iterations):
+            self._iteration_count = iteration + 1
+            
+            print(f"\n=== Iteration {self._iteration_count}/{max_iterations} ===")
+            
+            # Step 1: Adaptive sampling strategy
+            if enable_adaptive_sampling and len(self._performance_history) > 0:
+                try:
+                    # Create predictions_data structure for adaptive sampling
+                    predictions_data = {
+                        'iteration_count': self._iteration_count,
+                        'performance_history': self._performance_history
+                    }
+                    
+                    adaptive_result = self.adaptive_sampling_strategy(
+                        predictions_data, self._iteration_count, self._performance_history
+                    )
+                    
+                    # Update acquisition config based on adaptive strategy
+                    if adaptive_result and 'acquisition_config' in adaptive_result:
+                        current_acquisition_config.update(adaptive_result['acquisition_config'])
+                        print(f"Adaptive sampling updated acquisition config: {adaptive_result['acquisition_config']}")
+                        
+                except Exception as e:
+                    print(f"Warning: Adaptive sampling failed: {str(e)}")
+            
+            # Step 2: Run single iteration analysis
+            try:
+                if len(target_columns) == 1:
+                    # Single objective
+                    iteration_results = self._run_single_iteration(
+                        self._current_training_data, self._current_virtual_data,
+                        target_columns[0], feature_columns, goal_directions[0],
+                        model_config, current_acquisition_config, n_iterations_bootstrap
+                    )
+                else:
+                    # Multi-objective
+                    iteration_results = self._run_multi_objective_single_iteration(
+                        self._current_training_data, self._current_virtual_data,
+                        target_columns, feature_columns, goal_directions,
+                        model_config, current_acquisition_config, 
+                        n_iterations_bootstrap, n_scalarizations
+                    )
+                    
+            except Exception as e:
+                print(f"Error in iteration {self._iteration_count}: {str(e)}")
+                yield {
+                    'iteration': self._iteration_count,
+                    'recommendations': pd.DataFrame(),
+                    'performance_metrics': None,
+                    'should_stop': True,
+                    'stop_reason': f'Analysis failed: {str(e)}',
+                    'acquisition_config': current_acquisition_config
+                }
+                break
+            
+            # Step 3: Optimized batch sampling
+            if enable_batch_optimization and len(iteration_results) > batch_size:
+                try:
+                    # Prepare predictions data for batch sampling
+                    predictions_data = {
+                        'acquisition_values': iteration_results['acquisition_score'].values,
+                        'uncertainty': iteration_results.get('uncertainty_std', 
+                                                            iteration_results.get(f'{target_columns[0]}_uncertainty_std')),
+                        'predicted_mean': iteration_results.get('predicted_mean', 
+                                                              iteration_results.get(f'{target_columns[0]}_predicted_mean'))
+                    }
+                    
+                    # Apply optimized batch sampling
+                    batch_indices = self.optimized_batch_sampling(
+                        predictions_data, batch_size, 
+                        diversity_weight=0.3, uncertainty_threshold=0.1
+                    )
+                    
+                    recommendations = iteration_results.iloc[batch_indices].copy()
+                    print(f"Optimized batch sampling selected {len(recommendations)} diverse samples")
+                    
+                except Exception as e:
+                    print(f"Warning: Batch optimization failed, using top samples: {str(e)}")
+                    recommendations = iteration_results.head(batch_size).copy()
+            else:
+                recommendations = iteration_results.head(batch_size).copy()
+            
+            # Step 4: Calculate performance metrics
+            try:
+                performance_metrics = self.assess_model_reliability(
+                    self._current_training_data, target_columns, feature_columns
+                )
+                
+                # Store performance history
+                if isinstance(performance_metrics, dict):
+                    # Multi-objective: use average R² score
+                    avg_r2 = np.mean([score for score in performance_metrics.values() if score is not None])
+                else:
+                    # Single objective: use the R² score directly
+                    avg_r2 = performance_metrics if performance_metrics is not None else 0.0
+                
+                self._performance_history.append(avg_r2)
+                
+            except Exception as e:
+                print(f"Warning: Performance assessment failed: {str(e)}")
+                performance_metrics = None
+            
+            # Step 5: Intelligent stopping criteria
+            should_stop = False
+            stop_reason = None
+            
+            if enable_intelligent_stopping and len(self._performance_history) >= stopping_config['min_iterations']:
+                try:
+                    stopping_result = self.intelligent_stopping_criteria(
+                        self._performance_history,
+                        min_iterations=stopping_config['min_iterations'],
+                        patience=stopping_config['patience'],
+                        min_improvement=stopping_config['min_improvement'],
+                        convergence_window=stopping_config['convergence_window']
+                    )
+                    
+                    if stopping_result['should_stop']:
+                        should_stop = True
+                        stop_reason = stopping_result['reason']
+                        print(f"Intelligent stopping triggered: {stop_reason}")
+                        
+                except Exception as e:
+                    print(f"Warning: Stopping criteria evaluation failed: {str(e)}")
+            
+            # Step 6: Simulate adding recommendations to training data
+            # (In real application, this would be done after experimental validation)
+            if len(recommendations) > 0:
+                # For simulation, we can add the predicted values as "new experimental data"
+                new_training_rows = recommendations[feature_columns].copy()
+                
+                # Add predicted values as simulated experimental results
+                for i, target_col in enumerate(target_columns):
+                    if len(target_columns) == 1:
+                        pred_col = 'predicted_mean'
+                    else:
+                        pred_col = f'{target_col}_predicted_mean'
+                    
+                    if pred_col in recommendations.columns:
+                        new_training_rows[target_col] = recommendations[pred_col]
+                
+                # Update training data for next iteration
+                self._current_training_data = pd.concat([
+                    self._current_training_data, new_training_rows
+                ], ignore_index=True)
+                
+                # Remove recommended samples from virtual data
+                virtual_indices = recommendations.index
+                self._current_virtual_data = self._current_virtual_data.drop(virtual_indices).reset_index(drop=True)
+                
+                print(f"Updated training data: {len(self._current_training_data)} samples")
+                print(f"Remaining virtual data: {len(self._current_virtual_data)} samples")
+            
+            # Yield iteration results
+            yield {
+                'iteration': self._iteration_count,
+                'recommendations': recommendations,
+                'performance_metrics': performance_metrics,
+                'should_stop': should_stop,
+                'stop_reason': stop_reason,
+                'acquisition_config': current_acquisition_config,
+                'training_size': len(self._current_training_data),
+                'virtual_size': len(self._current_virtual_data)
+            }
+            
+            # Check stopping conditions
+            if should_stop:
+                break
+                
+            if len(self._current_virtual_data) < batch_size:
+                print("Insufficient virtual data for next iteration")
+                break
+        
+        print(f"\nIterative optimization completed after {self._iteration_count} iterations")
+        self._is_iterative_mode = False
+    
+    def get_optimization_state(self):
+        """
+        Get current state of iterative optimization.
+        
+        Returns:
+        --------
+        state : dict
+            Dictionary containing current optimization state
+        """
+        return {
+            'is_iterative_mode': self._is_iterative_mode,
+            'iteration_count': self._iteration_count,
+            'performance_history': self._performance_history.copy(),
+            'training_data_size': len(self._current_training_data) if self._current_training_data is not None else 0,
+            'virtual_data_size': len(self._current_virtual_data) if self._current_virtual_data is not None else 0
+        }
+    
+    def reset_optimization_state(self):
+        """
+        Reset the iterative optimization state.
+        """
+        self._is_iterative_mode = False
+        self._iteration_count = 0
+        self._performance_history = []
+        self._current_training_data = None
+        self._current_virtual_data = None
+        print("Optimization state reset")
     
     def get_feature_importance(self, objective=None):
         """
@@ -1480,8 +1871,14 @@ class ActiveLearningOptimizer:
             print(f"Applying {len(constraints)} constraints...")
             initial_count = len(candidate_df)
             
+            # Get allowed feature names from the DataFrame
+            allowed_names = list(candidate_df.columns)
+            
             for constraint in constraints:
                 try:
+                    # Validate constraint string before evaluation
+                    self._validate_constraint_string(constraint, allowed_names)
+                    
                     # Create a safe evaluation environment with only the candidate data
                     # This allows expressions like "feature1 + feature2 <= 1.0"
                     mask = candidate_df.eval(constraint)
@@ -1492,6 +1889,9 @@ class ActiveLearningOptimizer:
                     print(f"Constraint '{constraint}': filtered {filtered_count} candidates, {remaining_count} remaining")
                     initial_count = remaining_count
                     
+                except ValueError as e:
+                    print(f"Warning: Constraint validation failed for '{constraint}': {str(e)}")
+                    continue
                 except Exception as e:
                     print(f"Warning: Could not apply constraint '{constraint}': {str(e)}")
                     continue
@@ -1702,7 +2102,7 @@ class ActiveLearningOptimizer:
     
     def _apply_constraints_original_style(self, candidate_df, constraints):
         """
-        按照原来的风格应用约束条件，逐个约束显示过滤信息
+        Apply constraints with original style formatting, including security validation.
         """
         if not constraints:
             return candidate_df
@@ -1711,8 +2111,14 @@ class ActiveLearningOptimizer:
         print(f"Applying {len(constraints)} constraints...")
         initial_count = len(result_df)
         
+        # Get allowed feature names from the DataFrame
+        allowed_names = list(candidate_df.columns)
+        
         for constraint in constraints:
             try:
+                # Validate constraint string before evaluation
+                self._validate_constraint_string(constraint, allowed_names)
+                
                 before_count = len(result_df)
                 mask = result_df.eval(constraint)
                 result_df = result_df[mask].reset_index(drop=True)
@@ -1724,15 +2130,72 @@ class ActiveLearningOptimizer:
                 if after_count == 0:
                     break
                     
+            except ValueError as e:
+                print(f"Warning: Constraint validation failed for '{constraint}': {str(e)}")
+                continue
             except Exception as e:
                 print(f"Warning: Could not apply constraint '{constraint}': {str(e)}")
                 continue
         
         return result_df
     
+    def _validate_constraint_string(self, constraint_string, allowed_names):
+        """
+        Validate constraint string to prevent code injection attacks.
+        
+        Parameters:
+        -----------
+        constraint_string : str
+            The constraint expression to validate
+        allowed_names : list
+            List of allowed variable names (feature names)
+            
+        Returns:
+        --------
+        bool : True if constraint is safe, raises ValueError if unsafe
+        """
+        import re
+        
+        # Remove whitespace for easier parsing
+        cleaned = re.sub(r'\s+', '', constraint_string)
+        
+        # Define allowed patterns
+        allowed_operators = r'[+\-*/()&|<>=!]'
+        allowed_numbers = r'\d+\.?\d*'
+        
+        # Create pattern for allowed names (escape special regex characters)
+        escaped_names = [re.escape(name) for name in allowed_names]
+        allowed_names_pattern = '|'.join(escaped_names) if escaped_names else 'NONE'
+        
+        # Complete allowed pattern
+        allowed_pattern = f'^({allowed_names_pattern}|{allowed_numbers}|{allowed_operators})+$'
+        
+        # Check if the constraint matches only allowed patterns
+        if not re.match(allowed_pattern, cleaned):
+            raise ValueError(f"Constraint contains unsafe characters: '{constraint_string}'")
+        
+        # Additional security checks for dangerous patterns
+        dangerous_patterns = [
+            r'__\w+__',  # Double underscore methods
+            r'import\s+',  # Import statements
+            r'exec\s*\(',  # Exec function
+            r'eval\s*\(',  # Eval function
+            r'open\s*\(',  # File operations
+            r'os\.',  # OS module
+            r'sys\.',  # Sys module
+            r'subprocess',  # Subprocess module
+            r'[;\n]',  # Multiple statements
+        ]
+        
+        for pattern in dangerous_patterns:
+            if re.search(pattern, constraint_string, re.IGNORECASE):
+                raise ValueError(f"Constraint contains potentially dangerous pattern: '{constraint_string}'")
+        
+        return True
+    
     def _apply_constraints_safe(self, candidate_df, constraints):
         """
-        安全地应用约束条件，提供详细的过滤信息
+        Safely apply constraints with validation to prevent code injection.
         """
         if not constraints:
             return candidate_df
@@ -1742,8 +2205,14 @@ class ActiveLearningOptimizer:
         
         print(f"   🔍 apply {len(constraints)} constraints...")
         
+        # Get allowed feature names from the DataFrame
+        allowed_names = list(candidate_df.columns)
+        
         for i, constraint in enumerate(constraints):
             try:
+                # Validate constraint string before evaluation
+                self._validate_constraint_string(constraint, allowed_names)
+                
                 before_count = len(result_df)
                 mask = result_df.eval(constraint)
                 result_df = result_df[mask].reset_index(drop=True)
@@ -1756,8 +2225,11 @@ class ActiveLearningOptimizer:
                     print(f"      ⚠️ constraint {i+1} filtered out all samples")
                     break
                     
+            except ValueError as e:
+                print(f"      ❌ constraint {i+1} validation failed: {str(e)}")
+                continue
             except Exception as e:
-                print(f"      ❌ constraint {i+1} failed: {str(e)}")
+                print(f"      ❌ constraint {i+1} evaluation failed: {str(e)}")
                 continue
         
         return result_df

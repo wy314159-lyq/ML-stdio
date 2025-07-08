@@ -1487,12 +1487,146 @@ Threading Architecture:
         feature_buttons_layout.addWidget(self.select_all_button)
         feature_buttons_layout.addWidget(self.select_none_button)
         
+        # Add feature sorting controls (enhanced slider design)
+        sort_widget = QGroupBox("特征排序")
+        sort_widget.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin: 3px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
+        sort_layout = QVBoxLayout(sort_widget)
+        sort_layout.setContentsMargins(5, 5, 5, 5)
+        sort_layout.setSpacing(5)
+        
+        # Current sorting status display  
+        self.sort_status_label = QLabel("当前: 元素优先")
+        self.sort_status_label.setStyleSheet("""
+            QLabel {
+                color: #2E86AB; 
+                font-size: 10pt; 
+                font-weight: bold;
+                background-color: #f0f8ff;
+                border: 1px solid #2E86AB;
+                border-radius: 3px;
+                padding: 2px 6px;
+            }
+        """)
+        self.sort_status_label.setAlignment(Qt.AlignCenter)
+        sort_layout.addWidget(self.sort_status_label)
+        
+        # Slider for sorting method selection
+        slider_layout = QVBoxLayout()
+        slider_layout.setContentsMargins(0, 0, 0, 0)
+        slider_layout.setSpacing(2)
+        
+        self.sort_methods = [
+            "元素优先",
+            "工艺优先", 
+            "A-Z", 
+            "Z-A",
+            "原始顺序"
+        ]
+        
+        self.feature_sort_slider = QSlider(Qt.Horizontal)
+        self.feature_sort_slider.setRange(0, len(self.sort_methods) - 1)
+        self.feature_sort_slider.setValue(0)  # Default to "元素优先"
+        self.feature_sort_slider.setTickPosition(QSlider.TicksBelow)
+        self.feature_sort_slider.setTickInterval(1)
+        self.feature_sort_slider.valueChanged.connect(self.on_feature_sort_slider_changed)
+        self.feature_sort_slider.setMinimumWidth(150)
+        self.feature_sort_slider.setMinimumHeight(30)
+        self.feature_sort_slider.setMaximumHeight(30)
+        
+        # Enhanced styling for better visibility
+        self.feature_sort_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 2px solid #bbb;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #f0f0f0, stop: 1 #e0e0e0);
+                height: 8px;
+                border-radius: 4px;
+            }
+            QSlider::sub-page:horizontal {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #2E86AB, stop: 1 #1a5490);
+                border: 2px solid #1a5490;
+                height: 8px;
+                border-radius: 4px;
+            }
+            QSlider::add-page:horizontal {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #f0f0f0, stop: 1 #d0d0d0);
+                border: 2px solid #bbb;
+                height: 8px;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #ffffff, stop:1 #d0d0d0);
+                border: 2px solid #2E86AB;
+                width: 18px;
+                height: 18px;
+                margin-top: -7px;
+                margin-bottom: -7px;
+                border-radius: 9px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #ffffff, stop:1 #e0e0e0);
+                border: 2px solid #1a5490;
+                box-shadow: 0px 2px 4px rgba(0,0,0,0.3);
+            }
+            QSlider::handle:horizontal:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #e0e0e0, stop:1 #c0c0c0);
+                border: 2px solid #1a5490;
+            }
+        """)
+        
+        # Add the slider to layout
+        slider_layout.addWidget(self.feature_sort_slider)
+        
+        # Enhanced tick labels with better spacing
+        tick_labels_widget = QWidget()
+        tick_labels_layout = QHBoxLayout(tick_labels_widget)
+        tick_labels_layout.setContentsMargins(9, 0, 9, 0)  # Align with slider handle positions
+        tick_labels_layout.setSpacing(0)
+        
+        # Show all method labels
+        for i, method in enumerate(self.sort_methods):
+            if i > 0:
+                tick_labels_layout.addStretch()
+            label = QLabel(method)
+            label.setStyleSheet("""
+                QLabel {
+                    font-size: 8pt; 
+                    color: #666; 
+                    font-weight: bold;
+                    padding: 1px;
+                }
+            """)
+            label.setAlignment(Qt.AlignCenter)
+            tick_labels_layout.addWidget(label)
+        
+        slider_layout.addWidget(tick_labels_widget)
+        sort_layout.addLayout(slider_layout)
+        
         self.feature_list = QListWidget()
         self.feature_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.feature_list.setMinimumHeight(150)  # Increased from 120 to 150
         self.feature_list.setMaximumHeight(200)  # Added maximum height to prevent too much expansion
         
         feature_layout.addWidget(feature_buttons)
+        feature_layout.addWidget(sort_widget)
         feature_layout.addWidget(self.feature_list)
         
         config_layout.addRow("Feature Variables:", feature_widget)
@@ -2280,6 +2414,9 @@ Threading Architecture:
                 
                 feature_columns = [col for col in common_numeric_columns if col not in excluded_targets]
                 
+                # 🆕 新增：智能特征排序功能
+                feature_columns = self._sort_features(feature_columns)
+                
                 print(f"Final feature columns ({len(feature_columns)}): {feature_columns}")
                 print(f"Expected feature count: {len(feature_columns)}")  # 🔧 修复：使用实际计算的特征数量
                 
@@ -2335,6 +2472,117 @@ Threading Architecture:
             if item.checkState() == Qt.Checked:
                 selected_features.append(item.text())
         return selected_features
+    
+    def _sort_features(self, feature_columns):
+        """Sort features according to the selected sorting method."""
+        if not hasattr(self, 'feature_sort_slider'):
+            # If sorting slider doesn't exist yet, return as-is
+            return feature_columns
+            
+        sort_index = self.feature_sort_slider.value()
+        sort_method = self.sort_methods[sort_index]
+        
+        if sort_method == "A-Z":
+            return sorted(feature_columns)
+        elif sort_method == "Z-A":
+            return sorted(feature_columns, reverse=True)
+        elif sort_method == "元素优先":
+            return self._sort_elements_first(feature_columns)
+        elif sort_method == "工艺优先":
+            return self._sort_process_first(feature_columns)
+        else:  # 原始顺序
+            return feature_columns
+    
+    def _sort_elements_first(self, feature_columns):
+        """Sort with chemical elements first, followed by other features."""
+        # 定义化学元素和工艺参数
+        element_names = ['Al', 'Co', 'Cr', 'Fe', 'Ni', 'Ta', 'Mo', 'W', 'Ti', 'V', 'Nb', 'Mn', 'Cu', 'Zn', 'Si', 'C', 'N', 'O', 'H', 'S', 'P']
+        process_params = [
+            'recrystalize_K', 'annealing_K', 'aging_K', 'homogenize_K', 
+            'h_time_h', 'ag_time_h', 'temp', 'time'
+        ]
+        material_props = [
+            'sigma', 'ys_Mpa', 'vec', 'delta_r', 'd_r', 'eeta', 'wf_sixsq', 'CR_01'
+        ]
+        
+        # 分类特征
+        elements = []
+        processes = []
+        materials = []
+        others = []
+        
+        for col in feature_columns:
+            if any(elem in col for elem in element_names):
+                elements.append(col)
+            elif any(proc in col for proc in process_params):
+                processes.append(col)
+            elif any(mat in col for mat in material_props):
+                materials.append(col)
+            else:
+                others.append(col)
+        
+        # 分别排序后合并
+        return sorted(elements) + sorted(materials) + sorted(processes) + sorted(others)
+    
+    def _sort_process_first(self, feature_columns):
+        """Sort with process parameters first, followed by other features."""
+        # 定义工艺参数
+        process_params = [
+            'recrystalize_K', 'annealing_K', 'aging_K', 'homogenize_K', 
+            'h_time_h', 'ag_time_h', 'temp', 'time'
+        ]
+        element_names = ['Al', 'Co', 'Cr', 'Fe', 'Ni', 'Ta', 'Mo', 'W', 'Ti', 'V', 'Nb', 'Mn', 'Cu', 'Zn', 'Si', 'C', 'N', 'O', 'H', 'S', 'P']
+        material_props = [
+            'sigma', 'ys_Mpa', 'vec', 'delta_r', 'd_r', 'eeta', 'wf_sixsq', 'CR_01'
+        ]
+        
+        # 分类特征
+        processes = []
+        elements = []
+        materials = []
+        others = []
+        
+        for col in feature_columns:
+            if any(proc in col for proc in process_params):
+                processes.append(col)
+            elif any(elem in col for elem in element_names):
+                elements.append(col)
+            elif any(mat in col for mat in material_props):
+                materials.append(col)
+            else:
+                others.append(col)
+        
+        # 分别排序后合并
+        return sorted(processes) + sorted(elements) + sorted(materials) + sorted(others)
+    
+    def on_feature_sort_slider_changed(self):
+        """Handle feature sorting slider change."""
+        # Update status label
+        if hasattr(self, 'feature_sort_slider') and hasattr(self, 'sort_status_label'):
+            current_method = self.sort_methods[self.feature_sort_slider.value()]
+            self.sort_status_label.setText(f"当前: {current_method}")
+            print(f"🎛️ 特征排序已切换到: {current_method}")
+            
+            # Apply new sorting if data is loaded
+            if hasattr(self, 'training_data') and self.training_data is not None:
+                # 保存当前选择状态
+                selected_features = self.get_selected_features()
+                
+                # 重新更新列选择器（会应用新的排序）
+                self.update_column_selectors()
+                
+                # 恢复选择状态
+                for i in range(self.feature_list.count()):
+                    item = self.feature_list.item(i)
+                    if item.text() in selected_features:
+                        item.setCheckState(Qt.Checked)
+                    else:
+                        item.setCheckState(Qt.Unchecked)
+    
+    def on_feature_sort_changed(self):
+        """Handle feature sorting change (compatibility method)."""
+        # This method is kept for backward compatibility
+        self.on_feature_sort_slider_changed()
     
     def on_acquisition_changed(self):
         """Handle acquisition function change."""
@@ -2621,7 +2869,7 @@ Threading Architecture:
             # Store the top recommendation and set up feedback UI
             if not results_data.empty:
                 self.last_recommendation = results_data.iloc[0]
-                self.setup_feedback_ui()
+                self.setup_batch_feedback_ui()
             else:
                 self.feedback_box.hide()
             
@@ -2837,7 +3085,11 @@ Threading Architecture:
             method = uncertainty_method.currentText()
             recommendation += f"\n• Uncertainty Method: {method}\n"
         
-        recommendation += f"\nThis design is recommended for maximum information gain."
+        recommendation += f"\nThis design is recommended for maximum information gain.\n\n"
+        recommendation += "📋 NEXT STEPS:\n"
+        recommendation += "1. Perform experiment using the recommended formulation above\n"
+        recommendation += "2. Record your measured target values in the Batch Feedback table below\n"
+        recommendation += "3. Click 'Submit All Results' to add data and get next recommendations\n"
         
         self.recommendation_text.setText(recommendation)
     
@@ -2889,7 +3141,11 @@ Threading Architecture:
             
             recommendation += "\n"
         
-        recommendation += "💡 See Data Explorer tab for complete feature values."
+        recommendation += "💡 See Data Explorer tab for complete feature values.\n\n"
+        recommendation += "📋 NEXT STEPS:\n"
+        recommendation += "1. Perform experiments using the recommended formulations above\n"
+        recommendation += "2. Record your measured target values in the Batch Feedback table below\n"
+        recommendation += "3. Click 'Submit All Results' to add data and get next recommendations\n"
         
         self.recommendation_text.setText(recommendation)
     
@@ -3892,47 +4148,215 @@ Threading Architecture:
             QMessageBox.information(self, "Success", "Active learning session has been reset.")
     
     def setup_feedback_ui(self):
-        """Set up the feedback UI for iterative learning."""
+        """Set up feedback UI - delegates to batch feedback for better UX."""
+        self.setup_batch_feedback_ui()
+
+    def setup_batch_feedback_ui(self):
+        """Set up batch feedback UI for multiple experimental results."""
         # Clear any previous widgets
         while self.feedback_layout.count():
             child = self.feedback_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
-        if self.last_recommendation is None:
+        if self.results_data is None or len(self.results_data) == 0:
             self.feedback_box.hide()
             return
-            
-        self.feedback_inputs = {}
+
+        # Get batch size from current setting or default
+        if hasattr(self, 'current_batch_spin'):
+            batch_size = self.current_batch_spin.value()
+        else:
+            batch_size = getattr(self, 'batch_size_spin', type('', (), {'value': lambda: 5})).value()
+        top_recommendations = self.results_data.head(batch_size)
         
-        # Get the target columns based on current mode
+        if len(top_recommendations) == 0:
+            self.feedback_box.hide()
+            return
+
+        # Get target columns based on current mode
         if self.is_multi_objective:
             targets, _ = self.get_selected_targets_and_goals()
         else:
             targets = [self.target_combo.currentText()]
-        
-        # Create input fields for each target
-        for target in targets:
-            line_edit = QLineEdit()
-            line_edit.setPlaceholderText(f"Enter measured value for {target}")
-            line_edit.setStyleSheet("""
-                QLineEdit {
-                    padding: 8px;
-                    border: 2px solid #ced4da;
-                    border-radius: 4px;
-                    font-size: 13px;
-                }
-                QLineEdit:focus {
-                    border-color: #28a745;
-                    outline: none;
-                }
-            """)
-            self.feedback_layout.addRow(f"Measured {target}:", line_edit)
-            self.feedback_inputs[target] = line_edit
 
-        # Add the rerun button
-        rerun_button = QPushButton("Add Result and Start Next Iteration")
-        rerun_button.setStyleSheet("""
+        # Create title
+        title_label = QLabel(f"📊 Batch Experimental Results Entry")
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #2c3e50;
+                margin-bottom: 10px;
+                padding: 5px;
+            }
+        """)
+        self.feedback_layout.addRow(title_label)
+
+        # Batch size control
+        batch_control_layout = QHBoxLayout()
+        batch_control_layout.addWidget(QLabel("Batch Size:"))
+        
+        self.current_batch_spin = QSpinBox()
+        self.current_batch_spin.setRange(1, min(50, len(self.results_data)))
+        self.current_batch_spin.setValue(batch_size)
+        self.current_batch_spin.setToolTip("Number of recommendations to show for experiments")
+        self.current_batch_spin.valueChanged.connect(self.update_batch_size)
+        batch_control_layout.addWidget(self.current_batch_spin)
+        
+        batch_control_layout.addStretch()
+        batch_control_widget = QWidget()
+        batch_control_widget.setLayout(batch_control_layout)
+        self.feedback_layout.addRow(batch_control_widget)
+
+        # Instructions
+        instructions = QLabel(
+            f"Enter experimental results for the {len(top_recommendations)} recommended formulations below.\n"
+            f"Complete your experiments, then fill in the measured values for each target property.\n"
+            f"💡 Adjust batch size above to show more/fewer recommendations."
+        )
+        instructions.setStyleSheet("""
+            QLabel {
+                color: #666;
+                font-size: 11px;
+                margin-bottom: 10px;
+                padding: 5px;
+                background-color: #f8f9fa;
+                border-radius: 4px;
+            }
+        """)
+        instructions.setWordWrap(True)
+        self.feedback_layout.addRow(instructions)
+
+        # Create batch feedback table
+        self.batch_feedback_table = QTableWidget()
+        self.batch_feedback_table.setMinimumHeight(300)
+        self.batch_feedback_table.setAlternatingRowColors(True)
+        
+        feature_columns = self.get_selected_features()
+        # Show more features but limit to reasonable number for display
+        display_features = feature_columns[:6] if len(feature_columns) > 6 else feature_columns
+        all_columns = ['Rec#'] + display_features + [f"Measured_{target}" for target in targets] + ['Status']
+        
+        self.batch_feedback_table.setColumnCount(len(all_columns))
+        self.batch_feedback_table.setRowCount(len(top_recommendations))
+        self.batch_feedback_table.setHorizontalHeaderLabels(all_columns)
+        
+        # Store the batch data for later processing
+        self.batch_recommendations = top_recommendations.copy()
+        self.batch_target_inputs = {}
+        
+        # Populate table
+        for row_idx, (_, rec) in enumerate(top_recommendations.iterrows()):
+            # Recommendation number
+            rec_item = QTableWidgetItem(f"#{row_idx + 1}")
+            rec_item.setFlags(rec_item.flags() & ~Qt.ItemIsEditable)
+            rec_item.setTextAlignment(Qt.AlignCenter)
+            self.batch_feedback_table.setItem(row_idx, 0, rec_item)
+            
+            # Feature values (display features)
+            for col_idx, feature in enumerate(display_features):
+                if feature in rec.index:
+                    feature_item = QTableWidgetItem(f"{rec[feature]:.4f}")
+                    feature_item.setFlags(feature_item.flags() & ~Qt.ItemIsEditable)
+                    feature_item.setTextAlignment(Qt.AlignCenter)
+                    feature_item.setBackground(QColor(240, 248, 255))
+                    
+                    # Add tooltip with all features for this recommendation
+                    all_features_info = f"Recommendation #{row_idx + 1} - All Features:\n"
+                    for feat in feature_columns:
+                        if feat in rec.index:
+                            all_features_info += f"{feat}: {rec[feat]:.4f}\n"
+                    feature_item.setToolTip(all_features_info.strip())
+                    
+                    self.batch_feedback_table.setItem(row_idx, col_idx + 1, feature_item)
+            
+            # Target input fields
+            self.batch_target_inputs[row_idx] = {}
+            for target_idx, target in enumerate(targets):
+                input_item = QTableWidgetItem("")
+                input_item.setTextAlignment(Qt.AlignCenter)
+                input_item.setBackground(QColor(255, 248, 240))
+                input_item.setToolTip(f"Enter measured value for {target}")
+                col_pos = len(display_features) + 1 + target_idx
+                self.batch_feedback_table.setItem(row_idx, col_pos, input_item)
+                self.batch_target_inputs[row_idx][target] = input_item
+            
+            # Status column
+            status_item = QTableWidgetItem("Pending")
+            status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
+            status_item.setTextAlignment(Qt.AlignCenter)
+            status_item.setBackground(QColor(255, 255, 224))
+            self.batch_feedback_table.setItem(row_idx, len(all_columns) - 1, status_item)
+
+        # Style the table
+        self.batch_feedback_table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #ddd;
+                border: 1px solid #ccc;
+                background-color: white;
+                font-size: 11px;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                border: 1px solid #ddd;
+            }
+            QTableWidget::item:selected {
+                background-color: #e3f2fd;
+            }
+            QHeaderView::section {
+                background-color: #f5f5f5;
+                padding: 8px;
+                border: 1px solid #ddd;
+                font-weight: bold;
+            }
+        """)
+        
+        self.batch_feedback_table.resizeColumnsToContents()
+        self.feedback_layout.addRow(self.batch_feedback_table)
+
+        # Control buttons
+        button_layout = QHBoxLayout()
+        
+        # View full features button
+        view_features_btn = QPushButton("📋 View All Features")
+        view_features_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+        """)
+        view_features_btn.clicked.connect(self.show_full_features_dialog)
+        button_layout.addWidget(view_features_btn)
+        
+        # Validate button
+        validate_btn = QPushButton("🔍 Validate Inputs")
+        validate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8;
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+        """)
+        validate_btn.clicked.connect(self.validate_batch_inputs)
+        button_layout.addWidget(validate_btn)
+        
+        # Submit button
+        submit_btn = QPushButton("✅ Submit All Results & Start Next Iteration")
+        submit_btn.setStyleSheet("""
             QPushButton {
                 background-color: #28a745;
                 color: white;
@@ -3949,11 +4373,364 @@ Threading Architecture:
                 background-color: #1e7e34;
             }
         """)
-        rerun_button.clicked.connect(self.add_result_and_rerun)
-        self.feedback_layout.addRow(rerun_button)
+        submit_btn.clicked.connect(self.submit_batch_results)
+        button_layout.addWidget(submit_btn)
         
+        # Clear button
+        clear_btn = QPushButton("🗑️ Clear All")
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+        """)
+        clear_btn.clicked.connect(self.clear_batch_inputs)
+        button_layout.addWidget(clear_btn)
+        
+        button_widget = QWidget()
+        button_widget.setLayout(button_layout)
+        self.feedback_layout.addRow(button_widget)
+
         self.feedback_box.show()
-    
+
+    def update_batch_size(self):
+        """Update batch size and refresh the feedback table."""
+        if hasattr(self, 'current_batch_spin'):
+            self.setup_batch_feedback_ui()
+
+    def validate_batch_inputs(self):
+        """Validate all batch input values and update status."""
+        if not hasattr(self, 'batch_target_inputs'):
+            return
+            
+        valid_count = 0
+        total_count = len(self.batch_target_inputs)
+        
+        for row_idx, target_inputs in self.batch_target_inputs.items():
+            all_valid = True
+            values = {}
+            
+            for target, input_item in target_inputs.items():
+                value_str = input_item.text().strip()
+                
+                if not value_str:
+                    all_valid = False
+                    input_item.setBackground(QColor(255, 240, 240))  # Light red
+                    input_item.setToolTip(f"Missing value for {target}")
+                    continue
+                    
+                try:
+                    value = float(value_str)
+                    values[target] = value
+                    input_item.setBackground(QColor(240, 255, 240))  # Light green
+                    input_item.setToolTip(f"Valid value: {value}")
+                except ValueError:
+                    all_valid = False
+                    input_item.setBackground(QColor(255, 240, 240))  # Light red
+                    input_item.setToolTip(f"Invalid number: '{value_str}'")
+            
+            # Update status column
+            status_col = self.batch_feedback_table.columnCount() - 1
+            status_item = self.batch_feedback_table.item(row_idx, status_col)
+            
+            if all_valid:
+                status_item.setText("✅ Valid")
+                status_item.setBackground(QColor(240, 255, 240))
+                valid_count += 1
+            else:
+                status_item.setText("❌ Invalid")
+                status_item.setBackground(QColor(255, 240, 240))
+        
+        # Show validation summary
+        if valid_count == total_count:
+            QMessageBox.information(self, "Validation Complete", 
+                                   f"✅ All {total_count} entries are valid and ready for submission!")
+        else:
+            QMessageBox.warning(self, "Validation Issues", 
+                               f"⚠️ {valid_count}/{total_count} entries are valid. "
+                               f"Please fix the highlighted issues.")
+
+    def clear_batch_inputs(self):
+        """Clear all batch input values."""
+        if not hasattr(self, 'batch_target_inputs'):
+            return
+            
+        reply = QMessageBox.question(self, "Clear All Inputs", 
+                                   "Are you sure you want to clear all input values?",
+                                   QMessageBox.Yes | QMessageBox.No,
+                                   QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            for row_idx, target_inputs in self.batch_target_inputs.items():
+                for target, input_item in target_inputs.items():
+                    input_item.setText("")
+                    input_item.setBackground(QColor(255, 248, 240))  # Original color
+                    input_item.setToolTip(f"Enter measured value for {target}")
+                
+                # Reset status
+                status_col = self.batch_feedback_table.columnCount() - 1
+                status_item = self.batch_feedback_table.item(row_idx, status_col)
+                status_item.setText("Pending")
+                status_item.setBackground(QColor(255, 255, 224))
+
+    def submit_batch_results(self):
+        """Submit all batch experimental results and start next iteration."""
+        if not hasattr(self, 'batch_target_inputs') or not hasattr(self, 'batch_recommendations'):
+            QMessageBox.warning(self, "Warning", "No batch data available to submit.")
+            return
+
+        # Collect and validate all results
+        batch_results = []
+        feature_columns = self.get_selected_features()
+        
+        for row_idx, target_inputs in self.batch_target_inputs.items():
+            row_data = {}
+            
+            # Get feature values from recommendations
+            rec = self.batch_recommendations.iloc[row_idx]
+            for feature in feature_columns:
+                if feature in rec.index:
+                    row_data[feature] = rec[feature]
+            
+            # Get target values from user input
+            target_values = {}
+            for target, input_item in target_inputs.items():
+                value_str = input_item.text().strip()
+                
+                if not value_str:
+                    QMessageBox.critical(self, "Input Error", 
+                                       f"Missing value for {target} in recommendation #{row_idx + 1}")
+                    return
+                
+                try:
+                    target_values[target] = float(value_str)
+                except ValueError:
+                    QMessageBox.critical(self, "Input Error", 
+                                       f"Invalid number '{value_str}' for {target} in recommendation #{row_idx + 1}")
+                    return
+            
+            row_data['targets'] = target_values
+            batch_results.append(row_data)
+
+        # Confirm submission
+        reply = QMessageBox.question(self, "Submit Batch Results", 
+                                   f"Submit {len(batch_results)} experimental results and start next iteration?",
+                                   QMessageBox.Yes | QMessageBox.No,
+                                   QMessageBox.Yes)
+        
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            # Add all results to session
+            for result in batch_results:
+                # Extract features and targets
+                feature_series = pd.Series({k: v for k, v in result.items() if k != 'targets'})
+                target_dict = result['targets']
+                
+                # Add to session
+                self.session.add_new_point(feature_series, target_dict)
+
+            # Record performance metrics
+            if self.optimizer and self.results_data is not None:
+                try:
+                    training_data = self.session.get_combined_training_data()
+                    
+                    if self.is_multi_objective:
+                        targets_list, goals_list = self.get_selected_targets_and_goals()
+                        target_col = targets_list[0] if targets_list else None
+                    else:
+                        target_col = self.target_combo.currentText()
+                        goals_list = ['maximize' if self.maximize_radio.isChecked() else 'minimize']
+                    
+                    if target_col and target_col in training_data.columns:
+                        # Assess model performance
+                        reliability_score = self.optimizer.assess_model_reliability(
+                            training_data, target_col, feature_columns
+                        )
+                        
+                        # Get feature importance
+                        feature_importance = self.optimizer.get_feature_importance()
+                        if isinstance(feature_importance, dict):
+                            feature_importance = feature_importance.get(target_col, {})
+                        
+                        # Calculate best value found so far
+                        if goals_list[0] == 'maximize':
+                            best_value = training_data[target_col].max()
+                        else:
+                            best_value = training_data[target_col].min()
+                        
+                        # Calculate uncertainty metrics
+                        uncertainty_metrics = {
+                            'mean_uncertainty': self.results_data['uncertainty_std'].mean(),
+                            'max_uncertainty': self.results_data['uncertainty_std'].max(),
+                            'min_uncertainty': self.results_data['uncertainty_std'].min()
+                        }
+                        
+                        # Calculate acquisition function statistics
+                        acquisition_stats = {
+                            'max_acquisition': self.results_data['acquisition_score'].max(),
+                            'mean_acquisition': self.results_data['acquisition_score'].mean(),
+                            'top_10_mean': self.results_data.head(10)['acquisition_score'].mean()
+                        }
+                        
+                        # Add performance record
+                        self.session.add_performance_record(
+                            model_performance={'r2_score': reliability_score},
+                            feature_importance=feature_importance,
+                            best_value=best_value,
+                            uncertainty_metrics=uncertainty_metrics,
+                            acquisition_stats=acquisition_stats
+                        )
+                        
+                        # Auto-tune model if needed
+                        iteration_count = self.session.get_iteration_count()
+                        if reliability_score is not None and isinstance(reliability_score, (int, float)):
+                            if reliability_score < 0.1 or iteration_count % 5 == 0:
+                                try:
+                                    print("Starting automatic hyperparameter optimization...")
+                                    tuned_params = self.optimizer.auto_tune_model(
+                                        training_df=training_data,
+                                        target_columns=target_col,
+                                        feature_columns=feature_columns
+                                    )
+                                    
+                                    if tuned_params:
+                                        self.optimizer.apply_optimized_parameters(tuned_params)
+                                        print(f"Applied optimized parameters: {tuned_params}")
+                                
+                                except Exception as tune_error:
+                                    print(f"Warning: Auto-tuning failed: {tune_error}")
+                        
+                except Exception as e:
+                    print(f"Warning: Could not record performance metrics: {e}")
+
+            # Clean up UI
+            self.feedback_box.hide()
+            
+            # Update all visualizations
+            self.update_session_status()
+            self.update_history_tab()
+            self.update_learning_curves()
+            self.update_feature_evolution()
+            self.update_exploration_analysis()
+            
+            # Show success message
+            iteration_count = self.session.get_iteration_count()
+            QMessageBox.information(self, "Batch Submission Successful", 
+                                   f"✅ {len(batch_results)} experimental results added successfully!\n"
+                                   f"Starting iteration {iteration_count + 1}...")
+            
+            # Automatically start next analysis
+            self.run_analysis()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to submit batch results: {str(e)}")
+
+    def show_full_features_dialog(self):
+        """Show a dialog with all features for all recommendations."""
+        if not hasattr(self, 'batch_recommendations'):
+            QMessageBox.warning(self, "Warning", "No recommendations available to display.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Complete Feature Values for All Recommendations")
+        dialog.setModal(True)
+        dialog.resize(1000, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Create table with all features
+        feature_columns = self.get_selected_features()
+        table = QTableWidget()
+        table.setRowCount(len(self.batch_recommendations))
+        table.setColumnCount(len(feature_columns) + 1)  # +1 for recommendation number
+        
+        headers = ['Rec#'] + feature_columns
+        table.setHorizontalHeaderLabels(headers)
+        
+        # Populate table
+        for row_idx, (_, rec) in enumerate(self.batch_recommendations.iterrows()):
+            # Recommendation number
+            rec_item = QTableWidgetItem(f"#{row_idx + 1}")
+            rec_item.setTextAlignment(Qt.AlignCenter)
+            rec_item.setBackground(QColor(240, 248, 255))
+            table.setItem(row_idx, 0, rec_item)
+            
+            # All feature values
+            for col_idx, feature in enumerate(feature_columns):
+                if feature in rec.index:
+                    value_item = QTableWidgetItem(f"{rec[feature]:.6f}")
+                    value_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(row_idx, col_idx + 1, value_item)
+        
+        table.setAlternatingRowColors(True)
+        table.resizeColumnsToContents()
+        
+        # Style the table
+        table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #ddd;
+                border: 1px solid #ccc;
+                background-color: white;
+                font-size: 10px;
+            }
+            QTableWidget::item {
+                padding: 4px;
+                border: 1px solid #ddd;
+            }
+            QHeaderView::section {
+                background-color: #f5f5f5;
+                padding: 6px;
+                border: 1px solid #ddd;
+                font-weight: bold;
+                font-size: 10px;
+            }
+        """)
+        
+        layout.addWidget(QLabel(f"Complete feature values for {len(self.batch_recommendations)} recommendations:"))
+        layout.addWidget(table)
+        
+        # Export button
+        export_btn = QPushButton("📄 Export to CSV")
+        export_btn.clicked.connect(lambda: self.export_recommendations_csv())
+        layout.addWidget(export_btn)
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec_()
+
+    def export_recommendations_csv(self):
+        """Export current recommendations to CSV file."""
+        if not hasattr(self, 'batch_recommendations'):
+            QMessageBox.warning(self, "Warning", "No recommendations available to export.")
+            return
+
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"recommendations_{timestamp}.csv"
+        
+        try:
+            # Add recommendation number
+            export_data = self.batch_recommendations.copy()
+            export_data.insert(0, 'Recommendation_Number', range(1, len(export_data) + 1))
+            
+            export_data.to_csv(filename, index=False)
+            QMessageBox.information(self, "Export Successful", 
+                                   f"Recommendations exported to {filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export: {str(e)}")
+
     def add_result_and_rerun(self):
         """Add the user's experimental result and start the next iteration."""
         if self.last_recommendation is None:
